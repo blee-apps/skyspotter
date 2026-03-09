@@ -111,7 +111,7 @@
         
         .plane-label { 
             position: absolute; background: var(--ui-bg); backdrop-filter: var(--ui-backdrop); border: 1px solid rgba(255,255,255,0.15); 
-            border-radius: 6px; padding: 8px 10px; white-space: nowrap; transform: translate(-50%, -50%); 
+            border-radius: 6px; padding: 8px 10px; white-space: nowrap; top: 0; left: 0;
             box-shadow: 0 4px 12px rgba(0,0,0,0.3); display: none; will-change: transform, opacity; transition: opacity 0.2s;
             cursor: pointer; color: #ddd; font-size: 11px; pointer-events: auto;
         }
@@ -135,7 +135,7 @@
 
     <div id="start-screen">
         <h1 class="hero-title">SkySpotter</h1>
-        <p class="hero-subtitle">Immersive planespotting with live weather and air traffic data</p>
+        <p class="hero-subtitle">Immersive 3D planespotting with live data</p>
         
         <div class="control-group">
             <select class="airport-selector-start" id="setup-airport">
@@ -187,6 +187,11 @@
             <div class="heading-text" id="heading-display">360°</div>
 
             <div class="stance-controls">
+                <button class="stance-btn" id="stance-float" title="Floating (100m)">
+                    <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M2 14c3.5-4 6.5-4 10 0 3.5-4 6.5-4 10 0" />
+                    </svg>
+                </button>
                 <button class="stance-btn active" id="stance-sit" title="Sit (1.0m)">
                     <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle cx="10" cy="7" r="2"/><path d="M10 9v6h6v5M6 12l4 1 4-1"/></svg>
                 </button>
@@ -226,6 +231,20 @@
         let distantCloudMesh = null;
         let skyMesh = null;
 
+        let envSpotlights = [];
+
+        // Global Materials
+        const navRedMat = new THREE.MeshBasicMaterial({ color: 0xff0000, transparent: true, opacity: 0 });
+        const navGreenMat = new THREE.MeshBasicMaterial({ color: 0x00ff00, transparent: true, opacity: 0 });
+        const strobeMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0 });
+        const runwayLightMat = new THREE.MeshBasicMaterial({ color: 0xffeeaa, transparent: true, opacity: 0 });
+
+        // Pre-allocate path line materials to prevent memory leak
+        const PATH_COLORS = [0xFF2A55, 0x2AFF55, 0x2A88FF, 0xFFD700, 0x00E5FF, 0xAA00FF];
+        const PATH_MATERIALS = PATH_COLORS.map(cHex => new THREE.MeshBasicMaterial({ 
+            color: cHex, transparent: true, opacity: 0.6, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending 
+        }));
+
         // Storm Globals
         let isStormActive = false;
         let lightningMesh = null;
@@ -251,15 +270,6 @@
             "VIR": "Virgin Atlantic", "ACA": "Air Canada", "CCA": "Air China", "CSN": "China Southern Airlines",
             "CES": "China Eastern Airlines", "RYR": "Ryanair", "EZY": "easyJet", "ETD": "Etihad Airways"
         };
-
-        const PATH_COLORS = [
-            0xFF2A55, 
-            0x2AFF55, 
-            0x2A88FF, 
-            0xFFD700, 
-            0x00E5FF, 
-            0xAA00FF  
-        ];
 
         // --- Network Helper ---
         async function fetchWithTimeout(url, options = {}, timeoutMs = 4000) {
@@ -464,6 +474,45 @@
             consoleEl.scrollTop = consoleEl.scrollHeight;
         }
 
+        // --- Memory Management Helpers ---
+        function cleanEnvironment() {
+            envGroup.children.forEach(obj => {
+                obj.traverse(child => {
+                    if (child.userData && child.userData.disposeGeometry && child.geometry) {
+                        child.geometry.dispose();
+                    }
+                });
+            });
+            envGroup.clear();
+            envSpotlights = [];
+        }
+
+        function cleanClouds() {
+            cloudGroup.children.forEach(cluster => {
+                if(cluster.children.length > 0 && cluster.children[0].material) {
+                    cluster.children[0].material.dispose();
+                }
+            });
+            cloudGroup.clear();
+            cloudMeshes = [];
+        }
+
+        // --- View State API Integration ---
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                if (audioCtx && audioCtx.state === 'running') audioCtx.suspend();
+                if (animationFrameId) { cancelAnimationFrame(animationFrameId); animationFrameId = null; }
+                if (fetchIntervalId) { clearInterval(fetchIntervalId); fetchIntervalId = null; }
+            } else {
+                if (document.getElementById('start-screen').style.opacity === '0') {
+                    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+                    lastTimestamp = performance.now();
+                    if (!animationFrameId) animate();
+                    if (!usingMockData && !fetchIntervalId) fetchIntervalId = setInterval(fetchFlights, 10000);
+                }
+            }
+        });
+
         // --- Three.js Setup ---
         const container = document.getElementById('canvas-container');
         const scene = new THREE.Scene();
@@ -497,7 +546,7 @@
         dirLight.shadow.camera.far = 15000;
         dirLight.shadow.mapSize.width = 2048;
         dirLight.shadow.mapSize.height = 2048;
-        dirLight.shadow.bias = -0.0005;
+        dirLight.shadow.bias = -0.0005; 
         scene.add(dirLight);
 
         const envGroup = new THREE.Group();
@@ -720,8 +769,7 @@
         let cloudMeshes = [];
 
         function generateClouds(count) {
-            cloudGroup.clear();
-            cloudMeshes = [];
+            cleanClouds();
             
             for(let i=0; i<count; i++) {
                 const cluster = new THREE.Group();
@@ -866,12 +914,10 @@
                 topColor = lerpColor(0x060a0f, 0x56687a, t);
                 midColor = lerpColor(0x121822, 0x8598a8, t);
                 botColor = lerpColor(0x1f2836, 0xbccbd9, t);
-                fogColorHex = (t > 0.5) ? 0x8598a8 : 0x121822;
             } else {
                 topColor = lerpColor(0x020305, 0x3A72A4, t);
                 midColor = lerpColor(0x0a1220, 0x5D94CA, t);
                 botColor = lerpColor(0x1a2535, 0xB0D0E8, t);
-                fogColorHex = (t > 0.5) ? 0x8BAECC : 0x0a1220;
             }
 
             if (isDaytime && !isCloudy && t > 0.1 && t < 0.6) botColor = '#e0a08b'; 
@@ -890,9 +936,11 @@
             skyContext.fillStyle = gradient;
             skyContext.fillRect(0, 0, 2, 512);
             skyTexture.needsUpdate = true;
-            scene.fog.color.setHex(fogColorHex);
+            
+            scene.fog.color.setStyle(botColor);
             scene.fog.density = isCloudy ? 0.0012 : 0.0006;
             if (weatherCodeState >= 45 && weatherCodeState <= 48) scene.fog.density = 0.005; 
+            if (isStormActive) scene.fog.density = 0.002;
         }
 
         // --- Coarse / High-Contrast Ground Textures ---
@@ -1077,7 +1125,6 @@
         const villaGeo = new THREE.BoxGeometry(0.8, 0.3, 0.8);
         const villaMat = new THREE.MeshLambertMaterial({ color: 0xf5f5f5, flatShading: true });
         const terminalMat = new THREE.MeshLambertMaterial({ color: 0x999999, flatShading: true });
-        const waterMat = new THREE.MeshStandardMaterial({ color: 0x1a3a5a, roughness: 0.1, metalness: 0.8, transparent: true, opacity: 0.85 });
 
         const trunkGeo = new THREE.CylinderGeometry(0.04, 0.06, 0.4, 5);
         const trunkMat = new THREE.MeshLambertMaterial({ color: 0x4a3a2a, flatShading: true });
@@ -1086,12 +1133,48 @@
         const leafMat = new THREE.MeshLambertMaterial({ color: 0x2d5a27, flatShading: true });
 
         function addRunway(x, z, length, width, heading) {
-            const rwMesh = new THREE.Mesh(new THREE.PlaneGeometry(width, length), runwayMat);
+            const rwGroup = new THREE.Group();
+            rwGroup.position.set(x, 0.01, z);
+            rwGroup.rotation.y = -heading * (Math.PI/180);
+
+            const pGeo = new THREE.PlaneGeometry(width, length);
+            const rwMesh = new THREE.Mesh(pGeo, runwayMat);
             rwMesh.rotation.x = -Math.PI/2;
-            rwMesh.rotation.z = -heading * (Math.PI/180);
-            rwMesh.position.set(x, 0.01, z);
             rwMesh.receiveShadow = true;
-            envGroup.add(rwMesh);
+            rwMesh.userData.disposeGeometry = true; 
+            rwGroup.add(rwMesh);
+
+            // Runway Edge Lights
+            const numLights = Math.floor(length / 8);
+            const sGeo = new THREE.SphereGeometry(0.2, 4, 4);
+            const lightInst = new THREE.InstancedMesh(sGeo, runwayLightMat, numLights * 2);
+            lightInst.userData.disposeGeometry = true;
+            
+            const dummy = new THREE.Object3D();
+            let idx = 0;
+            for (let i = 0; i < numLights; i++) {
+                const lZ = (i / (numLights - 1) - 0.5) * length;
+                dummy.position.set(width / 2 + 0.5, 0.1, lZ);
+                dummy.updateMatrix();
+                lightInst.setMatrixAt(idx++, dummy.matrix);
+                dummy.position.set(-width / 2 - 0.5, 0.1, lZ);
+                dummy.updateMatrix();
+                lightInst.setMatrixAt(idx++, dummy.matrix);
+            }
+            rwGroup.add(lightInst);
+
+            // Overhead Surface SpotLight
+            const sLight = new THREE.SpotLight(0xfff5e6, 0); 
+            sLight.position.set(0, 50, 0);
+            sLight.target.position.set(0, 0, 0);
+            sLight.angle = Math.PI / 2.5;
+            sLight.penumbra = 0.5;
+            sLight.distance = 200;
+            rwGroup.add(sLight);
+            rwGroup.add(sLight.target);
+            envSpotlights.push(sLight);
+
+            envGroup.add(rwGroup);
         }
 
         function addBuildings(type, cx, cz, count, radius) {
@@ -1151,29 +1234,24 @@
         }
 
         function addTerminal(x, z, sx, sz, heading) {
-            const mesh = new THREE.Mesh(new THREE.BoxGeometry(sx, 1, sz), terminalMat);
+            const bGeo = new THREE.BoxGeometry(sx, 1, sz);
+            const mesh = new THREE.Mesh(bGeo, terminalMat);
             mesh.position.set(x, 0.5, z);
             mesh.rotation.y = -heading * (Math.PI/180);
             mesh.receiveShadow = true; mesh.castShadow = true;
-            envGroup.add(mesh);
-        }
-
-        function addWater(x, z, w, h) {
-            const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w, h), waterMat);
-            mesh.rotation.x = -Math.PI/2;
-            mesh.position.set(x, 0.05, z);
+            mesh.userData.disposeGeometry = true;
             envGroup.add(mesh);
         }
 
         function buildEnvironment(id) {
-            envGroup.clear();
+            cleanEnvironment();
+
             if (isWinter) return;
 
             switch(id) {
                 case 'SIN':
                     addRunway(10, 80, 150, 3, 20); 
                     addTerminal(20, 150, 20, 30, 20);
-                    addWater(-100, -50, 400, 200); 
                     addTrees('palm', 0, 0, 60, 30);
                     break;
                 case 'LHR':
@@ -1186,13 +1264,11 @@
                     addRunway(60, 60, 150, 3, 130); 
                     addRunway(50, 90, 150, 3, 220); 
                     addTerminal(120, 120, 40, 20, 130);
-                    addWater(-80, -20, 300, 300); 
                     addTrees('bare', 0, 0, 40, 25);
                     break;
                 case 'HND':
                     addRunway(-40, 80, 150, 3, 220); 
                     addTerminal(20, 140, 50, 20, 220);
-                    addWater(100, -80, 400, 400); 
                     addBuildings('warehouse', 40, -20, 40, 40);
                     break;
                 case 'DXB':
@@ -1263,7 +1339,7 @@
 
                 if (particleType === 'snow') {
                     px += (vel.x + Math.sin(t + py)) * 2 * dt;
-                    pz += (vel.z + Math.cos(t + py)) * 2 * dt;
+                    pz += (vel.z + Math.cos(timeSeconds + py)) * 2 * dt;
                 } else { px += vel.x * dt; }
                 py += vel.y * dt;
 
@@ -1344,6 +1420,25 @@
         rContrail.position.set(2.0, -0.6, 2.25);
         rContrail.name = "contrailR";
         planeGeometryCache.add(rContrail);
+
+        // Wing Nav Lights
+        const lightSphereGeo = new THREE.SphereGeometry(0.15, 8, 8);
+        
+        const portLight = new THREE.Mesh(lightSphereGeo, navRedMat);
+        portLight.position.set(-1.9, 0, 0);
+        lWing.add(portLight);
+        
+        const portStrobe = new THREE.Mesh(lightSphereGeo, strobeMat);
+        portStrobe.position.set(-2.1, 0, 0);
+        lWing.add(portStrobe);
+
+        const starboardLight = new THREE.Mesh(lightSphereGeo, navGreenMat);
+        starboardLight.position.set(1.9, 0, 0);
+        rWing.add(starboardLight);
+        
+        const starboardStrobe = new THREE.Mesh(lightSphereGeo, strobeMat);
+        starboardStrobe.position.set(2.1, 0, 0);
+        rWing.add(starboardStrobe);
 
         const pathPlaneGeo = new THREE.PlaneGeometry(25, 8000);
 
@@ -1464,15 +1559,7 @@
 
                 scene.add(mesh);
 
-                const colorHex = PATH_COLORS[hash % PATH_COLORS.length];
-                const pathMat = new THREE.MeshBasicMaterial({ 
-                    color: colorHex, 
-                    transparent: true, 
-                    opacity: 0.6, 
-                    side: THREE.DoubleSide,
-                    depthWrite: false,
-                    blending: THREE.AdditiveBlending 
-                });
+                const pathMat = PATH_MATERIALS[hash % PATH_MATERIALS.length];
                 const pathLine = new THREE.Mesh(pathPlaneGeo, pathMat);
                 pathLine.rotation.x = -Math.PI / 2; 
                 pathLine.position.y = -10; 
@@ -1506,7 +1593,14 @@
                 });
 
                 document.getElementById('labels-container').appendChild(el);
-                activePlanes.set(icao, { mesh, el, pathLine, targetPos: new THREE.Vector3(x, y, z), velocity, heading, alt });
+                
+                // Track state for DOM optimizations
+                activePlanes.set(icao, { 
+                    mesh, el, pathLine, 
+                    targetPos: new THREE.Vector3(x, y, z), 
+                    velocity, heading, alt,
+                    lastScreenX: null, lastScreenY: null, lastOpacity: null
+                });
             }
         }
 
@@ -1571,7 +1665,6 @@
             activePlanes.forEach(p => { 
                 scene.remove(p.mesh); 
                 p.el.remove(); 
-                if(p.pathLine) { p.pathLine.material.dispose(); }
             });
             activePlanes.clear();
             selectedIcao = null;
@@ -1647,6 +1740,7 @@
         document.getElementById('data-status-badge').addEventListener('click', toggleDataMode);
         document.getElementById('path-toggle').addEventListener('click', togglePaths);
 
+        document.getElementById('stance-float').addEventListener('click', () => setStance(5.0, 'stance-float'));
         document.getElementById('stance-sit').addEventListener('click', () => setStance(0.05, 'stance-sit'));
         document.getElementById('stance-lie').addEventListener('click', () => setStance(0.015, 'stance-lie'));
 
@@ -1759,6 +1853,26 @@
 
             if (grassMesh && grassMesh.visible) {
                 grassUniforms.uTime.value = timeSeconds;
+            }
+
+            // Night Lighting Updates
+            if (!isDaytime || isCloudy) {
+                navRedMat.opacity = 0.8;
+                navGreenMat.opacity = 0.8;
+                runwayLightMat.opacity = 0.9;
+                
+                // Double-flash strobe
+                const tMod = timeSeconds % 1.5;
+                strobeMat.opacity = (tMod < 0.05 || (tMod > 0.15 && tMod < 0.2)) ? 1.0 : 0.0;
+                
+                const nightIntensity = isCloudy ? 1.5 : 1.0;
+                envSpotlights.forEach(l => l.intensity = nightIntensity * 2.0);
+            } else {
+                navRedMat.opacity = 0;
+                navGreenMat.opacity = 0;
+                strobeMat.opacity = 0;
+                runwayLightMat.opacity = 0;
+                envSpotlights.forEach(l => l.intensity = 0);
             }
 
             if (isDaytime && birdMesh) {
@@ -1876,14 +1990,24 @@
                     p.el.classList.remove('visible');
                 } else {
                     p.el.classList.add('visible');
-                    const x = (proj.x * 0.5 + 0.5) * window.innerWidth;
-                    const y = (-(proj.y * 0.5) + 0.5) * window.innerHeight;
-                    p.el.style.transform = `translate(calc(${x}px - 50%), calc(${y}px + 45px))`;
                     
-                    if (selectedIcao === icao) {
-                        p.el.style.opacity = '1';
-                    } else {
-                        p.el.style.opacity = distToCam > 1500 ? '0.2' : (distToCam > 800 ? '0.6' : '1');
+                    // Hardware accelerated caching to prevent DOM thrashing
+                    const x = Math.round((proj.x * 0.5 + 0.5) * window.innerWidth);
+                    const y = Math.round((-(proj.y * 0.5) + 0.5) * window.innerHeight);
+
+                    if (p.lastScreenX !== x || p.lastScreenY !== y) {
+                        p.el.style.transform = `translate3d(${x}px, ${y}px, 0) translate(-50%, 45px)`;
+                        p.lastScreenX = x;
+                        p.lastScreenY = y;
+                    }
+                    
+                    let targetOpacity = '1';
+                    if (selectedIcao !== icao) {
+                        targetOpacity = distToCam > 1500 ? '0.2' : (distToCam > 800 ? '0.6' : '1');
+                    }
+                    if (p.lastOpacity !== targetOpacity) {
+                        p.el.style.opacity = targetOpacity;
+                        p.lastOpacity = targetOpacity;
                     }
                 }
             });
