@@ -1,0 +1,1971 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>SkySpotter</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        :root {
+            --ui-text: #ffffff;
+            --ui-bg: rgba(20, 25, 30, 0.75);
+            --ui-backdrop: blur(12px);
+            --accent: #4facfe;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; -webkit-user-select: none; }
+        body { font-family: 'Inter', sans-serif; background-color: #050505; overflow: hidden; width: 100vw; height: 100vh; color: var(--ui-text); touch-action: none; overscroll-behavior: none; }
+
+        #canvas-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; touch-action: none; }
+        #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 10; pointer-events: none; opacity: 0; transition: opacity 0.5s ease; }
+
+        /* Start Screen */
+        #start-screen {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: linear-gradient(135deg, #a1c4fd 0%, #c2e9fb 100%);
+            display: flex; flex-direction: column; justify-content: center; align-items: center;
+            z-index: 100; pointer-events: auto; transition: opacity 0.5s ease;
+            color: #111;
+        }
+
+        .hero-title { font-size: 48px; font-weight: 700; letter-spacing: -1.5px; margin-bottom: 8px; color: #000; }
+        .hero-subtitle { font-size: 16px; color: #444; margin-bottom: 40px; font-weight: 500; text-align: center; }
+
+        .control-group { display: flex; flex-direction: column; gap: 16px; width: 100%; max-width: 320px; z-index: 2; }
+
+        .airport-selector-start {
+            background: rgba(255,255,255,0.9); border: 1px solid rgba(0,0,0,0.2); color: #000;
+            padding: 14px 16px; border-radius: 8px; font-family: inherit; font-size: 16px; width: 100%; font-weight: 500;
+            cursor: pointer; outline: none; appearance: none;
+            background-image: url("data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%23000000%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5-1.9-9.2-5.5-12.8z%22%2F%3E%3C%2Fsvg%3E");
+            background-repeat: no-repeat; background-position: right 16px top 50%; background-size: 10px auto;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+        }
+        .airport-selector-start option { background: #fff; }
+
+        #start-btn {
+            background: #000; color: #fff; border: none; padding: 16px;
+            font-size: 16px; font-weight: 600; border-radius: 8px; cursor: pointer;
+            transition: background 0.2s, opacity 0.2s; width: 100%;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+        #start-btn:hover { background: #333; }
+        #start-btn:disabled { background: #888; cursor: not-allowed; }
+
+        #boot-console {
+            width: 100%; max-width: 320px; height: 120px; margin-top: 24px;
+            background: rgba(255,255,255,0.7); border: 1px solid rgba(0,0,0,0.1);
+            border-radius: 6px; padding: 12px; font-family: monospace; font-size: 12px;
+            color: #333; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; z-index: 2;
+        }
+        .log-entry { line-height: 1.4; word-wrap: break-word; }
+        .log-error { color: #d00; }
+        .log-success { color: #080; }
+        .log-warn { color: #b8860b; }
+
+        .credits { position: absolute; bottom: 20px; font-size: 10px; color: rgba(0,0,0,0.4); text-align: center; width: 100%; pointer-events: none; }
+
+        /* Main UI */
+        .header { position: absolute; top: 30px; left: 20px; text-shadow: 0 1px 4px rgba(0,0,0,0.6); pointer-events: auto; }
+        .active-airport { font-size: 18px; font-weight: 600; margin-bottom: 6px; display: flex; align-items: center; }
+        
+        .controls-row { display: flex; gap: 8px; align-items: center; }
+        
+        .status-badge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 20px; font-size: 10px; font-weight: 700; letter-spacing: 0.5px; cursor: pointer; transition: background 0.2s, filter 0.2s; }
+        .status-badge:hover { filter: brightness(1.2); }
+        .status-badge.live { background: rgba(215, 25, 33, 0.85); border: 1px solid rgba(255, 100, 100, 0.4); }
+        .status-badge.sim { background: rgba(80, 80, 80, 0.85); border: 1px solid rgba(150, 150, 150, 0.4); color: #ccc; }
+        .status-badge.empty { background: rgba(30, 30, 30, 0.85); border: 1px solid rgba(80, 80, 80, 0.4); color: #888; }
+        .status-dot { width: 6px; height: 6px; background: #fff; border-radius: 50%; }
+        .status-badge.live .status-dot { animation: blink 1.5s infinite; }
+        .status-badge.empty .status-dot { opacity: 0.2; }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+        #path-toggle { background: rgba(80, 80, 80, 0.85); border: 1px solid rgba(150, 150, 150, 0.4); color: #ccc; }
+        #path-toggle.active { background: rgba(79, 172, 254, 0.85); border: 1px solid rgba(135, 206, 235, 0.4); color: #fff; }
+
+        #back-btn { background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); color: white; padding: 4px 10px; border-radius: 6px; font-size: 11px; cursor: pointer; margin-left: 12px; transition: background 0.2s; backdrop-filter: var(--ui-backdrop); }
+        #back-btn:hover { background: rgba(255,255,255,0.2); }
+
+        .info-panel { position: absolute; top: 30px; right: 20px; text-align: right; text-shadow: 0 1px 4px rgba(0,0,0,0.6); pointer-events: auto; display: flex; flex-direction: column; align-items: flex-end; }
+        .time-weather { font-size: 15px; margin-bottom: 2px; font-weight: 500; font-variant-numeric: tabular-nums; }
+        .weather-desc { font-size: 12px; opacity: 0.8; margin-bottom: 16px; }
+
+        .compass-container { position: relative; width: 50px; height: 50px; background: var(--ui-bg); backdrop-filter: var(--ui-backdrop); border-radius: 50%; border: 1px solid rgba(255,255,255,0.1); display: flex; justify-content: center; align-items: center; box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
+        .compass-dial { position: absolute; width: 100%; height: 100%; border-radius: 50%; transition: transform 0.1s ease-out; }
+        .compass-mark { position: absolute; font-size: 9px; font-weight: 700; color: #fff; width: 10px; text-align: center; left: 50%; transform: translateX(-50%); }
+        .compass-mark.n { top: 2px; color: var(--accent); } .compass-mark.s { bottom: 2px; }
+        .compass-mark.e { top: 50%; right: 2px; transform: translate(0, -50%); left: auto; }
+        .compass-mark.w { top: 50%; left: 2px; transform: translate(0, -50%); }
+        .compass-needle { width: 0; height: 0; border-left: 5px solid transparent; border-right: 5px solid transparent; border-bottom: 20px solid rgba(255,255,255,0.9); position: absolute; top: 5px; filter: drop-shadow(0 2px 2px rgba(0,0,0,0.5)); }
+        .heading-text { font-size: 12px; margin-top: 8px; font-variant-numeric: tabular-nums; opacity: 0.8; margin-bottom: 16px; }
+
+        .stance-controls { display: flex; flex-direction: column; gap: 6px; background: var(--ui-bg); backdrop-filter: var(--ui-backdrop); padding: 6px; border-radius: 20px; border: 1px solid rgba(255,255,255,0.1); box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
+        .stance-btn { background: transparent; border: none; color: #fff; opacity: 0.4; cursor: pointer; width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; transition: all 0.2s; }
+        .stance-btn:hover { opacity: 0.8; }
+        .stance-btn.active { opacity: 1; background: rgba(255,255,255,0.2); }
+
+        /* HUD Labels */
+        #labels-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
+        
+        .plane-label { 
+            position: absolute; background: var(--ui-bg); backdrop-filter: var(--ui-backdrop); border: 1px solid rgba(255,255,255,0.15); 
+            border-radius: 6px; padding: 8px 10px; white-space: nowrap; transform: translate(-50%, -50%); 
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3); display: none; will-change: transform, opacity; transition: opacity 0.2s;
+            cursor: pointer; color: #ddd; font-size: 11px; pointer-events: auto;
+        }
+        .plane-label.visible { display: block; }
+        
+        .plane-header { display: flex; align-items: center; gap: 8px; }
+        .plane-callsign { font-weight: 600; font-size: 13px; color: var(--accent); }
+        .plane-metrics { display: flex; gap: 8px; font-variant-numeric: tabular-nums; font-family: monospace; }
+        
+        .plane-details { display: none; margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.1); font-size: 11px; flex-direction: column; gap: 4px; }
+        .plane-label.expanded { background: rgba(30, 38, 48, 0.95); z-index: 100; border-color: rgba(255,255,255,0.4); }
+        .plane-label.expanded .plane-details { display: flex; }
+        
+        .hud-airline { font-weight: 600; color: #fff; margin-bottom: 2px; }
+        .hud-primary { font-weight: 500; color: #ccc; }
+        .hud-secondary { opacity: 0.7; font-family: monospace; }
+        .icao-badge { display: inline-flex; align-items: center; justify-content: center; padding: 0 4px; height: 16px; background: #333; color: #ccc; font-size: 9px; font-family: monospace; border-radius: 3px; border: 1px solid #555; }
+    </style>
+</head>
+<body>
+
+    <div id="start-screen">
+        <h1 class="hero-title">SkySpotter</h1>
+        <p class="hero-subtitle">Live Global Air Traffic Visualizer</p>
+        
+        <div class="control-group">
+            <select class="airport-selector-start" id="setup-airport">
+                <option value="SIN" data-name="SIN - Changi Beach" data-lat="1.3918" data-lon="104.0003" data-env="sandgrass" data-tz="Asia/Singapore">Singapore (SIN) - Changi Beach</option>
+                <option value="JFK" data-name="JFK - Charles Park" data-lat="40.6508" data-lon="-73.8397" data-env="grassbrown" data-tz="America/New_York">New York (JFK) - Charles Park</option>
+                <option value="LHR" data-name="LHR - Myrtle Ave" data-lat="51.4646" data-lon="-0.4280" data-env="lush" data-tz="Europe/London">London (LHR) - Myrtle Ave</option>
+                <option value="HND" data-name="HND - Jonanjima" data-lat="35.5802" data-lon="139.7832" data-env="asphalt" data-tz="Asia/Tokyo">Tokyo (HND) - Jonanjima Park</option>
+                <option value="DXB" data-name="DXB - Al Garhoud" data-lat="25.2445" data-lon="55.3400" data-env="sand" data-tz="Asia/Dubai">Dubai (DXB) - Al Garhoud Park</option>
+            </select>
+            <button id="start-btn" type="button">Connect & Enter</button>
+        </div>
+
+        <div id="boot-console">
+            <div class="log-entry">Awaiting connection...</div>
+        </div>
+        
+        <div class="credits">© 2026 Brandon Lee. Built with Gemini.</div>
+    </div>
+
+    <div id="canvas-container"></div>
+
+    <div id="ui-layer">
+        <div class="header">
+            <div class="active-airport">
+                <span id="ui-airport-name">SIN - Changi Beach</span>
+                <button id="back-btn" type="button">Change</button>
+            </div>
+            <div class="controls-row">
+                <div class="status-badge" id="data-status-badge">
+                    <div class="status-dot"></div>
+                    <span id="data-status-text">INITIALIZING</span>
+                </div>
+                <div class="status-badge" id="path-toggle">
+                    PATHS: OFF
+                </div>
+            </div>
+        </div>
+
+        <div class="info-panel">
+            <div class="time-weather"><span id="time-display">--:--</span> | <span id="temp-display">--</span>°C</div>
+            <div class="weather-desc" id="weather-display">Fetching...</div>
+            <div class="compass-container">
+                <div class="compass-dial" id="compass-dial">
+                    <div class="compass-mark n">N</div><div class="compass-mark e">E</div>
+                    <div class="compass-mark s">S</div><div class="compass-mark w">W</div>
+                </div>
+                <div class="compass-needle"></div>
+            </div>
+            <div class="heading-text" id="heading-display">360°</div>
+
+            <div class="stance-controls">
+                <button class="stance-btn active" id="stance-sit" title="Sit (1.0m)">
+                    <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle cx="10" cy="7" r="2"/><path d="M10 9v6h6v5M6 12l4 1 4-1"/></svg>
+                </button>
+                <button class="stance-btn" id="stance-lie" title="Lie Down (0.3m)">
+                    <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="17" r="2"/><path d="M8 17h12M10 14l-2 3M16 17l4 -2"/></svg>
+                </button>
+            </div>
+        </div>
+
+        <div id="labels-container"></div>
+    </div>
+
+    <script>
+        // --- Core State ---
+        const SCALE = 0.05; 
+        const activePlanes = new Map();
+        let currentAirport = null;
+        let lastTimestamp = performance.now();
+        let animationFrameId = null;
+        let fetchIntervalId = null;
+        let usingMockData = false;
+        let selectedIcao = null;
+        let showPaths = false;
+        
+        let currentEnvType = 'grass';
+        let isWinter = false;
+        let isCloudy = false;
+        let weatherCodeState = 0;
+        let maxAnisotropy = 1;
+        let isDaytime = true;
+
+        let targetCamY = 0.05; 
+        
+        let starLayer1 = null;
+        let starLayer2 = null;
+        let distantCloudMesh = null;
+        let skyMesh = null;
+
+        // Storm Globals
+        let isStormActive = false;
+        let lightningMesh = null;
+        let lightningFrames = 0;
+        let lightningFlash = 0;
+
+        // Bird Flock Globals
+        const BIRD_COUNT = 30;
+        let birdMesh = null;
+        const birdUniforms = { uTime: { value: 0 } };
+        let flockActive = false;
+        let flockSpawnTimer = 3; 
+        let flockCenter = new THREE.Vector3();
+        let flockTarget = new THREE.Vector3();
+        let flockProgress = 0;
+        const birdOffsets = [];
+
+        const AIRLINE_MAP = {
+            "AAL": "American Airlines", "UAL": "United Airlines", "DAL": "Delta Air Lines", "SWA": "Southwest Airlines",
+            "BAW": "British Airways", "AFR": "Air France", "DLH": "Lufthansa", "KLM": "KLM Royal Dutch Airlines",
+            "UAE": "Emirates", "QTR": "Qatar Airways", "SIA": "Singapore Airlines", "QFA": "Qantas Airways",
+            "CPA": "Cathay Pacific", "ANA": "All Nippon Airways", "JAL": "Japan Airlines", "THA": "Thai Airways",
+            "VIR": "Virgin Atlantic", "ACA": "Air Canada", "CCA": "Air China", "CSN": "China Southern Airlines",
+            "CES": "China Eastern Airlines", "RYR": "Ryanair", "EZY": "easyJet", "ETD": "Etihad Airways"
+        };
+
+        const PATH_COLORS = [
+            0xFF2A55, 
+            0x2AFF55, 
+            0x2A88FF, 
+            0xFFD700, 
+            0x00E5FF, 
+            0xAA00FF  
+        ];
+
+        // --- Network Helper ---
+        async function fetchWithTimeout(url, options = {}, timeoutMs = 4000) {
+            const controller = new AbortController();
+            const id = setTimeout(() => controller.abort(), timeoutMs);
+            try {
+                const response = await fetch(url, { ...options, signal: controller.signal });
+                clearTimeout(id);
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                return await response.json();
+            } catch (error) {
+                clearTimeout(id);
+                throw error;
+            }
+        }
+
+        // --- Astronomical Sun Calculation ---
+        function getSunPosition(date, lat, lon) {
+            const PI = Math.PI, sin = Math.sin, cos = Math.cos, asin = Math.asin, atan2 = Math.atan2, tan = Math.tan;
+            const rad = PI / 180;
+            const dayMs = 1000 * 60 * 60 * 24;
+            const J1970 = 2440588, J2000 = 2451545;
+            const lw = rad * -lon, phi = rad * lat;
+            const d = date.valueOf() / dayMs - 0.5 + J1970 - J2000;
+            const M = rad * (357.5291 + 0.98560028 * d);
+            const C = rad * (1.9148 * sin(M) + 0.02 * sin(2 * M) + 0.0003 * sin(3 * M));
+            const P = M + C;
+            const L = P + rad * 102.9372;
+            const dec = asin(sin(L) * sin(rad * 23.4397));
+            const ra = atan2(sin(L) * cos(rad * 23.4397), cos(L));
+            const H = rad * (280.16 + 360.9856235 * d) - lw - ra;
+            
+            const alt = asin(sin(phi) * sin(dec) + cos(phi) * cos(dec) * cos(H));
+            const az = atan2(sin(H), cos(H) * sin(phi) - tan(dec) * cos(phi));
+            return { altitude: alt, azimuth: az + PI }; 
+        }
+
+        // --- Audio Context & Synthesis ---
+        let audioCtx, windGain, windFilter, globalNoiseBuffer;
+        let jetGain, jetFilter, jetPanner;
+        let birdPanner;
+
+        function initAudio() {
+            try {
+                if (audioCtx) { if (audioCtx.state === 'suspended') audioCtx.resume(); return; }
+                const AudioContext = window.AudioContext || window.webkitAudioContext;
+                audioCtx = new AudioContext();
+
+                const bufferSize = audioCtx.sampleRate * 2;
+                
+                globalNoiseBuffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+                const windData = globalNoiseBuffer.getChannelData(0);
+                for (let i = 0; i < bufferSize; i++) { windData[i] = Math.random() * 2 - 1; }
+                
+                const windSource = audioCtx.createBufferSource();
+                windSource.buffer = globalNoiseBuffer;
+                windSource.loop = true;
+                windFilter = audioCtx.createBiquadFilter();
+                windFilter.type = 'lowpass';
+                windGain = audioCtx.createGain();
+                windGain.gain.value = 0;
+                windSource.connect(windFilter);
+                windFilter.connect(windGain);
+                windGain.connect(audioCtx.destination);
+                windSource.start();
+
+                const jetNoiseBuffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+                const jetData = jetNoiseBuffer.getChannelData(0);
+                let lastOut = 0;
+                for (let i = 0; i < bufferSize; i++) {
+                    let white = Math.random() * 2 - 1;
+                    jetData[i] = (lastOut + (0.02 * white)) / 1.02;
+                    lastOut = jetData[i];
+                    jetData[i] *= 3.5; 
+                }
+
+                jetPanner = audioCtx.createStereoPanner ? audioCtx.createStereoPanner() : null;
+                birdPanner = audioCtx.createStereoPanner ? audioCtx.createStereoPanner() : null;
+                if (birdPanner) birdPanner.connect(audioCtx.destination);
+
+                const jetSource = audioCtx.createBufferSource();
+                jetSource.buffer = jetNoiseBuffer;
+                jetSource.loop = true;
+                jetFilter = audioCtx.createBiquadFilter();
+                jetFilter.type = 'lowpass';
+                jetGain = audioCtx.createGain();
+                jetGain.gain.value = 0;
+                
+                jetSource.connect(jetFilter);
+                jetFilter.connect(jetGain);
+
+                if (jetPanner) {
+                    jetGain.connect(jetPanner);
+                    jetPanner.connect(audioCtx.destination);
+                } else {
+                    jetGain.connect(audioCtx.destination);
+                }
+
+                jetSource.start();
+            } catch (e) { console.warn('Audio init failed.'); }
+        }
+
+        function suspendAudio() { if (audioCtx && audioCtx.state === 'running') audioCtx.suspend(); }
+
+        function playBirdChirp(panValue, volScale = 1.0) {
+            if (!audioCtx || audioCtx.state !== 'running' || volScale <= 0) return;
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            
+            osc.type = 'sine'; 
+            const startFreq = 2000 + Math.random() * 2000;
+            osc.frequency.setValueAtTime(startFreq, audioCtx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(startFreq * 0.5, audioCtx.currentTime + 0.1);
+            
+            const peakVol = (0.4 + Math.random() * 0.2) * volScale;
+            gain.gain.setValueAtTime(0, audioCtx.currentTime);
+            gain.gain.linearRampToValueAtTime(peakVol, audioCtx.currentTime + 0.02);
+            gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.1);
+            
+            osc.connect(gain);
+            if (birdPanner) {
+                birdPanner.pan.value = panValue;
+                gain.connect(birdPanner);
+            } else {
+                gain.connect(audioCtx.destination);
+            }
+            
+            osc.start();
+            osc.stop(audioCtx.currentTime + 0.15);
+        }
+
+        function playThunder(panValue) {
+            if (!audioCtx || audioCtx.state !== 'running' || !globalNoiseBuffer) return;
+            
+            const source = audioCtx.createBufferSource();
+            source.buffer = globalNoiseBuffer;
+            source.loop = true;
+
+            const filter = audioCtx.createBiquadFilter();
+            filter.type = 'lowpass';
+            filter.frequency.setValueAtTime(800, audioCtx.currentTime);
+            filter.frequency.exponentialRampToValueAtTime(100, audioCtx.currentTime + 1.5);
+            filter.frequency.linearRampToValueAtTime(50, audioCtx.currentTime + 3.0);
+
+            const gain = audioCtx.createGain();
+            gain.gain.setValueAtTime(0, audioCtx.currentTime);
+            gain.gain.linearRampToValueAtTime(1.5, audioCtx.currentTime + 0.1);
+            gain.gain.exponentialRampToValueAtTime(0.3, audioCtx.currentTime + 0.5);
+            gain.gain.linearRampToValueAtTime(0.01, audioCtx.currentTime + 3.0);
+
+            const panner = audioCtx.createStereoPanner ? audioCtx.createStereoPanner() : null;
+            if (panner) panner.pan.value = panValue;
+
+            source.connect(filter);
+            filter.connect(gain);
+            if (panner) {
+                gain.connect(panner);
+                panner.connect(audioCtx.destination);
+            } else {
+                gain.connect(audioCtx.destination);
+            }
+
+            source.start();
+            source.stop(audioCtx.currentTime + 3.5);
+        }
+
+        function updateAudio(t, closestDist, panValue) {
+            if (!audioCtx || audioCtx.state !== 'running') return;
+            
+            const gust = Math.sin(t * 0.15) * 0.5 + Math.sin(t * 0.28) * 0.3 + Math.sin(t * 0.45) * 0.2;
+            const normalizedGust = (gust + 1) / 2; 
+            windFilter.frequency.setTargetAtTime(isStormActive ? 300 + (normalizedGust * 1200) : 150 + (normalizedGust * 600), audioCtx.currentTime, 0.2);
+            windGain.gain.setTargetAtTime(isStormActive ? 0.05 + (normalizedGust * 0.15) : 0.01 + (normalizedGust * 0.08), audioCtx.currentTime, 0.2);
+
+            if (jetGain) {
+                const MAX_DIST = 2500;
+                let rVol = 0, rFreq = 100;
+                
+                if (closestDist < MAX_DIST) {
+                    const normDist = Math.max(0, 1 - (closestDist / MAX_DIST));
+                    rVol = Math.pow(normDist, 2) * 5.0; 
+                    rFreq = 150 + (normDist * 1200); 
+                }
+                
+                jetGain.gain.setTargetAtTime(rVol, audioCtx.currentTime, 0.1);
+                jetFilter.frequency.setTargetAtTime(rFreq, audioCtx.currentTime, 0.1);
+                if (jetPanner) jetPanner.pan.setTargetAtTime(panValue, audioCtx.currentTime, 0.1);
+            }
+        }
+
+        const consoleEl = document.getElementById('boot-console');
+        function logMsg(text, type = 'normal') {
+            const div = document.createElement('div');
+            div.className = `log-entry ${type !== 'normal' ? 'log-' + type : ''}`;
+            div.textContent = `> ${text}`;
+            consoleEl.appendChild(div);
+            consoleEl.scrollTop = consoleEl.scrollHeight;
+        }
+
+        // --- Three.js Setup ---
+        const container = document.getElementById('canvas-container');
+        const scene = new THREE.Scene();
+        scene.fog = new THREE.FogExp2(0x87CEEB, 0.0006);
+
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.005, 6000);
+        camera.position.set(0, targetCamY, 0); 
+        camera.rotation.order = 'YXZ';
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        
+        maxAnisotropy = renderer.capabilities.getMaxAnisotropy();
+        
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        container.appendChild(renderer.domElement);
+
+        const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 0.6);
+        scene.add(hemiLight);
+        
+        const dirLight = new THREE.DirectionalLight(0xffffff, 1.0);
+        dirLight.castShadow = true;
+        const d = 1000; 
+        dirLight.shadow.camera.left = -d;
+        dirLight.shadow.camera.right = d;
+        dirLight.shadow.camera.top = d;
+        dirLight.shadow.camera.bottom = -d;
+        dirLight.shadow.camera.near = 10;
+        dirLight.shadow.camera.far = 15000;
+        dirLight.shadow.mapSize.width = 2048;
+        dirLight.shadow.mapSize.height = 2048;
+        dirLight.shadow.bias = -0.0005;
+        scene.add(dirLight);
+
+        const envGroup = new THREE.Group();
+        scene.add(envGroup);
+
+        // --- Environment ---
+        const skyCanvas = document.createElement('canvas');
+        skyCanvas.width = 2; skyCanvas.height = 512;
+        const skyContext = skyCanvas.getContext('2d');
+        const skyTexture = new THREE.CanvasTexture(skyCanvas);
+        const skyGeo = new THREE.SphereGeometry(5000, 32, 15);
+        const skyMat = new THREE.MeshBasicMaterial({ map: skyTexture, side: THREE.BackSide, fog: false, depthWrite: false, depthTest: false });
+        skyMesh = new THREE.Mesh(skyGeo, skyMat);
+        skyMesh.renderOrder = -3;
+        scene.add(skyMesh);
+
+        // --- Distant Clouds (Procedural Shader Layer) ---
+        function createDistantClouds() {
+            const cloudShader = {
+                uniforms: {
+                    uTime: { value: 0 },
+                    uColor: { value: new THREE.Color(0xffffff) },
+                    uOpacity: { value: 0 }
+                },
+                vertexShader: `
+                    varying vec3 vPos;
+                    void main() {
+                        vPos = normalize(position);
+                        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                    }
+                `,
+                fragmentShader: `
+                    uniform float uTime;
+                    uniform vec3 uColor;
+                    uniform float uOpacity;
+                    varying vec3 vPos;
+
+                    float hash(vec2 p) { return fract(1e4 * sin(17.0 * p.x + p.y * 0.1) * (0.1 + abs(sin(p.y * 13.0 + p.x)))); }
+                    float noise(vec2 x) {
+                        vec2 i = floor(x);
+                        vec2 f = fract(x);
+                        float a = hash(i);
+                        float b = hash(i + vec2(1.0, 0.0));
+                        float c = hash(i + vec2(0.0, 1.0));
+                        float d = hash(i + vec2(1.0, 1.0));
+                        vec2 u = f * f * (3.0 - 2.0 * f);
+                        return mix(a, b, u.x) + (c - a) * u.y * (1.0 - u.x) + (d - b) * u.x * u.y;
+                    }
+                    float fbm(vec2 p) {
+                        float v = 0.0;
+                        float a = 0.5;
+                        for (int i = 0; i < 4; ++i) {
+                            v += a * noise(p);
+                            p = p * 2.0;
+                            a *= 0.5;
+                        }
+                        return v;
+                    }
+
+                    void main() {
+                        float angle = atan(vPos.z, vPos.x);
+                        float height = vPos.y;
+                        
+                        vec2 st = vec2(angle * 4.0 + uTime * 0.01, height * 6.0);
+                        float n = fbm(st);
+                        
+                        float verticalMask = smoothstep(0.4, 0.05, height) * smoothstep(-0.05, 0.05, height);
+                        float cloudAlpha = smoothstep(0.3, 0.7, n) * verticalMask;
+                        
+                        gl_FragColor = vec4(uColor, cloudAlpha * uOpacity);
+                    }
+                `
+            };
+
+            const dcGeo = new THREE.SphereGeometry(4900, 32, 16);
+            const dcMat = new THREE.ShaderMaterial({
+                uniforms: cloudShader.uniforms,
+                vertexShader: cloudShader.vertexShader,
+                fragmentShader: cloudShader.fragmentShader,
+                transparent: true,
+                side: THREE.BackSide,
+                depthWrite: false,
+                depthTest: true, 
+                fog: false 
+            });
+            distantCloudMesh = new THREE.Mesh(dcGeo, dcMat);
+            distantCloudMesh.renderOrder = -1; 
+            scene.add(distantCloudMesh);
+        }
+        createDistantClouds();
+
+        // --- Stars ---
+        function createStars() {
+            const createLayer = (count, size, radius, colorHex) => {
+                const geo = new THREE.BufferGeometry();
+                const pos = new Float32Array(count * 3);
+                for(let i=0; i<count*3; i+=3) {
+                    const u = Math.random();
+                    const v = Math.random();
+                    const theta = u * 2.0 * Math.PI;
+                    const phi = Math.acos(v); 
+                    const r = radius + Math.random() * 200;
+                    
+                    pos[i] = r * Math.sin(phi) * Math.cos(theta);
+                    pos[i+1] = r * Math.cos(phi); 
+                    pos[i+2] = r * Math.sin(phi) * Math.sin(theta);
+                }
+                geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+                const mat = new THREE.PointsMaterial({
+                    color: colorHex,
+                    size: size,
+                    transparent: true,
+                    opacity: 0, 
+                    blending: THREE.AdditiveBlending,
+                    sizeAttenuation: false,
+                    depthWrite: false, 
+                    depthTest: true, 
+                    fog: false 
+                });
+                const mesh = new THREE.Points(geo, mat);
+                mesh.renderOrder = -2;
+                return mesh;
+            };
+
+            starLayer1 = createLayer(4000, 1.5, 4800, 0xffffff); 
+            starLayer2 = createLayer(1500, 2.5, 4500, 0xeeeeff); 
+            
+            starLayer1.rotation.x = Math.PI / 8;
+            starLayer2.rotation.x = -Math.PI / 12;
+
+            scene.add(starLayer1);
+            scene.add(starLayer2);
+        }
+        createStars();
+
+        function createLightning(x, z) {
+            if(lightningMesh) {
+                scene.remove(lightningMesh);
+                lightningMesh.geometry.dispose();
+                lightningMesh.material.dispose();
+            }
+            const points = [];
+            let currentY = 1000 + Math.random()*500;
+            let currentX = x;
+            let currentZ = z;
+            points.push(new THREE.Vector3(currentX, currentY, currentZ));
+            
+            while(currentY > 0) {
+                currentY -= 100 + Math.random()*150;
+                currentX += (Math.random() - 0.5) * 200;
+                currentZ += (Math.random() - 0.5) * 200;
+                if (currentY < 0) currentY = 0;
+                points.push(new THREE.Vector3(currentX, currentY, currentZ));
+            }
+            
+            const geo = new THREE.BufferGeometry().setFromPoints(points);
+            const mat = new THREE.LineBasicMaterial({ color: 0xffffff, linewidth: 2 }); 
+            lightningMesh = new THREE.Line(geo, mat);
+            scene.add(lightningMesh);
+        }
+
+        // --- Bird Flock ---
+        function createBirds() {
+            const bGeo = new THREE.BufferGeometry();
+            const bVerts = new Float32Array([
+                0, 0, 0.08,
+                0, 0, -0.08,
+                -0.12, 0, 0,
+                0, 0, 0.08,
+                0.12, 0, 0,
+                0, 0, -0.08
+            ]);
+            bGeo.setAttribute('position', new THREE.BufferAttribute(bVerts, 3));
+            
+            const bMat = new THREE.MeshBasicMaterial({ 
+                color: 0x111111,
+                side: THREE.DoubleSide,
+                transparent: true,
+                opacity: 0
+            });
+
+            bMat.onBeforeCompile = (shader) => {
+                shader.uniforms.uTime = birdUniforms.uTime;
+                shader.vertexShader = `
+                    uniform float uTime;
+                    ${shader.vertexShader}
+                `.replace(
+                    `#include <begin_vertex>`,
+                    `
+                    #include <begin_vertex>
+                    #ifdef USE_INSTANCING
+                        float flapPhase = instanceMatrix[3][0] * 10.0;
+                    #else
+                        float flapPhase = 0.0;
+                    #endif
+                    float flapAmplitude = abs(position.x) * 2.0; 
+                    transformed.y += sin(uTime * 10.0 + flapPhase) * flapAmplitude;
+                    `
+                );
+            };
+
+            birdMesh = new THREE.InstancedMesh(bGeo, bMat, BIRD_COUNT);
+            
+            for(let i=0; i<BIRD_COUNT; i++) {
+                birdOffsets.push({
+                    x: (Math.random() - 0.5) * 8,
+                    y: (Math.random() - 0.5) * 3,
+                    z: (Math.random() - 0.5) * 8,
+                    phase: Math.random() * Math.PI * 2,
+                    speed: 0.2 + Math.random() * 0.2
+                });
+            }
+            scene.add(birdMesh);
+        }
+        createBirds();
+
+        const cloudGroup = new THREE.Group();
+        scene.add(cloudGroup);
+        const cloudGeo = new THREE.SphereGeometry(1, 16, 16);
+        let cloudMeshes = [];
+
+        function generateClouds(count) {
+            cloudGroup.clear();
+            cloudMeshes = [];
+            
+            for(let i=0; i<count; i++) {
+                const cluster = new THREE.Group();
+                const puffs = 5 + Math.random() * 10;
+                
+                const cMat = new THREE.MeshStandardMaterial({ 
+                    color: 0xffffff, 
+                    roughness: 1.0,
+                    transparent: true, 
+                    opacity: 0.7 + Math.random() * 0.2
+                });
+                
+                for(let j=0; j<puffs; j++) {
+                    const puff = new THREE.Mesh(cloudGeo, cMat);
+                    puff.position.set((Math.random()-0.5)*200, (Math.random()-0.5)*50, (Math.random()-0.5)*200);
+                    const s = 80 + Math.random()*120;
+                    puff.scale.set(s, s*0.5, s); 
+                    puff.rotation.y = Math.random() * Math.PI;
+                    cluster.add(puff);
+                }
+                cluster.position.set((Math.random()-0.5)*8000, 800 + Math.random()*600, (Math.random()-0.5)*8000);
+                cloudGroup.add(cluster);
+                cloudMeshes.push({ mesh: cluster, speed: 5 + Math.random() * 10 });
+            }
+        }
+
+        function lerpColor(hex1, hex2, t) {
+            const r1 = (hex1 >> 16) & 255, g1 = (hex1 >> 8) & 255, b1 = hex1 & 255;
+            const r2 = (hex2 >> 16) & 255, g2 = (hex2 >> 8) & 255, b2 = hex2 & 255;
+            const r = Math.round(r1 + (r2 - r1) * t);
+            const g = Math.round(g1 + (g2 - g1) * t);
+            const b = Math.round(b1 + (b2 - b1) * t);
+            return `rgb(${r},${g},${b})`;
+        }
+        
+        function blendRgbString(rgbStr, t) {
+            const match = rgbStr.match(/\d+/g);
+            if(!match) return rgbStr;
+            const r = Math.round(parseInt(match[0]) + (255 - parseInt(match[0])) * t);
+            const g = Math.round(parseInt(match[1]) + (255 - parseInt(match[1])) * t);
+            const b = Math.round(parseInt(match[2]) + (255 - parseInt(match[2])) * t);
+            return `rgb(${r},${g},${b})`;
+        }
+
+        function updateSkyAndLighting(localHour) {
+            if (!currentAirport) return;
+            
+            const sunrise = currentAirport.sunrise || 6.0;
+            const sunset = currentAirport.sunset || 18.0;
+            
+            let progress = 0; 
+            
+            if (localHour >= sunrise && localHour <= sunset) {
+                isDaytime = true;
+                progress = (localHour - sunrise) / (sunset - sunrise);
+            } else {
+                isDaytime = false;
+                const nightLength = 24 - sunset + sunrise;
+                if (localHour > sunset) {
+                    progress = (localHour - sunset) / nightLength;
+                } else {
+                    progress = (localHour + 24 - sunset) / nightLength;
+                }
+            }
+
+            const altAngle = Math.sin(progress * Math.PI) * (Math.PI / 2);
+            const azAngle = Math.PI - (progress * Math.PI); 
+            const t = isDaytime ? Math.max(0, Math.min(1, (altAngle + 0.2) / 0.6)) : 0;
+            
+            const dist = 5000;
+
+            if (isDaytime) {
+                dirLight.position.x = dist * Math.cos(altAngle) * Math.cos(azAngle);
+                dirLight.position.y = Math.max(100, dist * Math.sin(altAngle)); 
+                dirLight.position.z = dist * Math.cos(altAngle) * Math.sin(azAngle);
+                
+                const normAlt = altAngle / (Math.PI / 2);
+                dirLight.color.setHSL(0.1, 0.2, Math.min(1.0, normAlt * 2.5 + 0.6)); 
+                dirLight.intensity = isCloudy ? 0.6 : Math.max(0, Math.min(1.0, normAlt * 4.0));
+                
+                hemiLight.intensity = isCloudy ? 0.4 : Math.max(0.1, Math.min(0.45, normAlt * 2.0));
+                hemiLight.color.setHex(0xffffff);
+                hemiLight.groundColor.setHex(0x444444);
+            } else {
+                const moonAlt = Math.max(0.2, -altAngle); 
+                dirLight.position.x = dist * Math.cos(moonAlt) * Math.cos(azAngle);
+                dirLight.position.y = Math.max(100, dist * Math.sin(moonAlt));
+                dirLight.position.z = dist * Math.cos(moonAlt) * Math.sin(azAngle);
+                
+                dirLight.color.setHex(0x88aaff);
+                dirLight.intensity = isCloudy ? 0.05 : 0.15;
+                
+                hemiLight.intensity = isCloudy ? 0.02 : 0.05; 
+                hemiLight.color.setHex(0x111122);
+                hemiLight.groundColor.setHex(0x050505);
+            }
+
+            if (lightningFlash > 0) {
+                dirLight.intensity += lightningFlash * 3.0;
+                hemiLight.intensity += lightningFlash * 1.5;
+                dirLight.color.setHex(0xffffff);
+            }
+
+            if (starLayer1 && starLayer2) {
+                const starVisibility = isDaytime ? 0 : Math.max(0, Math.min(1, Math.sin(progress * Math.PI) * 4.0));
+                const cloudFade = weatherCodeState >= 3 ? 0.0 : (weatherCodeState > 0 ? 0.4 : 1.0);
+                const finalOpacity = starVisibility * cloudFade;
+                
+                starLayer1.material.opacity = finalOpacity * 0.6;
+                starLayer2.material.opacity = finalOpacity * 0.75;
+            }
+
+            if (distantCloudMesh) {
+                const targetOpacity = isCloudy ? 0.8 : 0.0;
+                distantCloudMesh.material.uniforms.uOpacity.value = targetOpacity;
+                
+                if (isCloudy) {
+                    const cColor = new THREE.Color();
+                    if (isDaytime) {
+                        cColor.setRGB(
+                            THREE.MathUtils.lerp(0.4, 1.0, t),
+                            THREE.MathUtils.lerp(0.5, 1.0, t),
+                            THREE.MathUtils.lerp(0.6, 1.0, t)
+                        );
+                        if (t > 0.1 && t < 0.6) {
+                            const sunsetFade = 1.0 - Math.abs((t - 0.35) / 0.25);
+                            cColor.lerp(new THREE.Color(0xd98c73), sunsetFade * 0.6);
+                        }
+                    } else {
+                        cColor.setRGB(0.05, 0.05, 0.1);
+                    }
+                    if (lightningFlash > 0) {
+                        cColor.lerp(new THREE.Color(0xffffff), lightningFlash);
+                    }
+                    distantCloudMesh.material.uniforms.uColor.value.copy(cColor);
+                }
+            }
+            
+            let topColor, midColor, botColor, fogColorHex;
+
+            if (isCloudy) {
+                topColor = lerpColor(0x060a0f, 0x56687a, t);
+                midColor = lerpColor(0x121822, 0x8598a8, t);
+                botColor = lerpColor(0x1f2836, 0xbccbd9, t);
+                fogColorHex = (t > 0.5) ? 0x8598a8 : 0x121822;
+            } else {
+                // Brightened clear sky codes
+                topColor = lerpColor(0x020305, 0x3A72A4, t);
+                midColor = lerpColor(0x0a1220, 0x5D94CA, t);
+                botColor = lerpColor(0x1a2535, 0xB0D0E8, t);
+                fogColorHex = (t > 0.5) ? 0x8BAECC : 0x0a1220;
+            }
+
+            if (isDaytime && !isCloudy && t > 0.1 && t < 0.6) botColor = '#e0a08b'; 
+            
+            if (lightningFlash > 0) {
+                topColor = blendRgbString(topColor, lightningFlash * 0.8);
+                midColor = blendRgbString(midColor, lightningFlash * 0.8);
+                botColor = blendRgbString(botColor, lightningFlash * 0.8);
+            }
+
+            const gradient = skyContext.createLinearGradient(0, 0, 0, 512);
+            gradient.addColorStop(0, topColor);
+            gradient.addColorStop(0.5, midColor);
+            gradient.addColorStop(1, botColor);
+            
+            skyContext.fillStyle = gradient;
+            skyContext.fillRect(0, 0, 2, 512);
+            skyTexture.needsUpdate = true;
+            scene.fog.color.setHex(fogColorHex);
+            scene.fog.density = isCloudy ? 0.0012 : 0.0006;
+            if (weatherCodeState >= 45 && weatherCodeState <= 48) scene.fog.density = 0.005; 
+        }
+
+        // --- Coarse / High-Contrast Ground Textures ---
+        function generateGroundTexture(envType, winter) {
+            const size = 1024;
+            const canvas = document.createElement('canvas');
+            canvas.width = size; canvas.height = size;
+            const ctx = canvas.getContext('2d');
+            
+            let r1,g1,b1, r2,g2,b2, r3,g3,b3;
+
+            if (winter) {
+                r1=224; g1=229; b1=235; r2=240; g2=245; b2=250; r3=190; g3=195; b3=200;
+            } else if (envType === 'asphalt') {
+                r1=100; g1=100; b1=100; r2=80; g2=80; b2=80; r3=120; g3=120; b3=120;
+            } else if (envType === 'sand') {
+                r1=210; g1=180; b1=140; r2=180; g2=150; b2=110; r3=235; g3=205; b3=165;
+            } else if (envType === 'sandgrass') {
+                r1=138; g1=154; b1=91; r2=100; g2=120; b2=60; r3=180; g3=160; b3=100;
+            } else if (envType === 'lush') {
+                r1=34; g1=139; b1=34; r2=20; g2=90; b2=20; r3=50; g3=180; b3=50;
+            } else { // grassbrown
+                r1=80; g1=95; b1=55; r2=65; g2=75; b2=40; r3=95; g3=115; b3=70;
+            }
+
+            ctx.fillStyle = `rgb(${r1},${g1},${b1})`;
+            ctx.fillRect(0, 0, size, size);
+
+            for (let i = 0; i < 60000; i++) {
+                ctx.fillStyle = Math.random() > 0.5 ? `rgb(${r2},${g2},${b2})` : `rgb(${r3},${g3},${b3})`;
+                ctx.globalAlpha = 0.4 + Math.random() * 0.4;
+                const w = 2 + Math.random() * 4;
+                const h = 2 + Math.random() * 4;
+                ctx.fillRect(Math.random() * size, Math.random() * size, w, h);
+            }
+            
+            const tex = new THREE.CanvasTexture(canvas);
+            tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+            tex.repeat.set(400, 400); 
+            tex.anisotropy = Math.min(8, maxAnisotropy);
+            
+            return tex;
+        }
+
+        const groundMat = new THREE.MeshLambertMaterial({ color: 0xffffff });
+        const ground = new THREE.Mesh(new THREE.PlaneGeometry(20000, 20000), groundMat);
+        ground.rotation.x = -Math.PI / 2;
+        ground.receiveShadow = true;
+        scene.add(ground);
+
+        // --- Cross-Quad Clump Grass Generation ---
+        const GRASS_COUNT = 6000;
+        let grassMesh;
+        const grassUniforms = { uTime: { value: 0 } };
+
+        function generateGrassTexture() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 128; canvas.height = 128;
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, 128, 128); 
+
+            for (let i = 0; i < 12; i++) {
+                ctx.beginPath();
+                const startX = 20 + Math.random() * 88;
+                ctx.moveTo(startX, 128); 
+
+                const endX = startX + (Math.random() - 0.5) * 40;
+                const endY = 10 + Math.random() * 40; 
+
+                const cpX = startX + (endX - startX) / 2 + (Math.random() - 0.5) * 20;
+                const cpY = 128 - (128 - endY) / 2;
+
+                ctx.quadraticCurveTo(cpX, cpY, endX, endY);
+
+                const g = 80 + Math.floor(Math.random() * 60);
+                ctx.strokeStyle = `rgb(40, ${g}, 35)`;
+                ctx.lineWidth = 3 + Math.random() * 3;
+                ctx.lineCap = 'round';
+                ctx.stroke();
+            }
+            const tex = new THREE.CanvasTexture(canvas);
+            return tex;
+        }
+
+        function createGrass() {
+            const s = 0.01; 
+            const h = 0.01; 
+            const vertices = new Float32Array([
+                -s, h, 0,   s, h, 0,   -s, 0, 0,   s, 0, 0, 
+                0, h, -s,   0, h, s,   0, 0, -s,   0, 0, s  
+            ]);
+            const uvs = new Float32Array([
+                0, 1,   1, 1,   0, 0,   1, 0,
+                0, 1,   1, 1,   0, 0,   1, 0
+            ]);
+            const indices = [
+                0, 2, 1,   2, 3, 1,
+                4, 6, 5,   6, 7, 5
+            ];
+            
+            const bladeGeo = new THREE.BufferGeometry();
+            bladeGeo.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
+            bladeGeo.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+            bladeGeo.setIndex(indices);
+            bladeGeo.computeVertexNormals();
+
+            const grassTex = generateGrassTexture();
+            const bladeMat = new THREE.MeshLambertMaterial({ 
+                map: grassTex,
+                transparent: false, 
+                alphaTest: 0.5, 
+                side: THREE.DoubleSide
+            });
+
+            bladeMat.onBeforeCompile = (shader) => {
+                shader.uniforms.uTime = grassUniforms.uTime;
+                shader.vertexShader = `
+                    uniform float uTime;
+                    ${shader.vertexShader}
+                `.replace(
+                    `#include <begin_vertex>`,
+                    `
+                    #include <begin_vertex>
+                    float normalizedHeight = position.y / 0.01;
+                    float bend = normalizedHeight * normalizedHeight;
+                    #ifdef USE_INSTANCING
+                        float phase = instanceMatrix[3][0] * 5.0 + instanceMatrix[3][2] * 5.0;
+                    #else
+                        float phase = 0.0;
+                    #endif
+                    transformed.x += sin(uTime * 2.0 + phase) * 0.005 * bend;
+                    transformed.z += cos(uTime * 2.0 + phase * 0.8) * 0.005 * bend;
+                    `
+                );
+            };
+
+            grassMesh = new THREE.InstancedMesh(bladeGeo, bladeMat, GRASS_COUNT);
+            grassMesh.receiveShadow = true; 
+            grassMesh.castShadow = true;
+
+            const dummy = new THREE.Object3D();
+            for (let i = 0; i < GRASS_COUNT; i++) {
+                const r = Math.pow(Math.random(), 2.0) * 5.0; 
+                const theta = Math.random() * Math.PI * 2;
+                dummy.position.set(Math.cos(theta) * r, 0, Math.sin(theta) * r);
+                dummy.rotation.set(0, Math.random() * Math.PI, 0); 
+                
+                dummy.scale.set(1.0 + Math.random(), 0.7 + Math.random() * 0.5, 1.0 + Math.random());
+                dummy.updateMatrix();
+                grassMesh.setMatrixAt(i, dummy.matrix);
+            }
+            scene.add(grassMesh);
+        }
+        createGrass();
+
+        function updateGroundVisuals() {
+            groundMat.map = generateGroundTexture(currentEnvType, isWinter); 
+            groundMat.needsUpdate = true;
+            const showGrass = ['grass', 'sandgrass', 'grassbrown', 'lush'].includes(currentEnvType);
+            grassMesh.visible = (showGrass && !isWinter);
+        }
+
+        // Procedural Scenery Generators
+        const rwTexCanvas = document.createElement('canvas');
+        rwTexCanvas.width = 128; rwTexCanvas.height = 512;
+        const rwCtx = rwTexCanvas.getContext('2d');
+        rwCtx.fillStyle = '#1a1a1a'; rwCtx.fillRect(0,0,128,512);
+        rwCtx.fillStyle = '#fff';
+        for(let i=0; i<512; i+=16) rwCtx.fillRect(62, i, 4, 8); 
+        rwCtx.fillRect(4, 0, 4, 512); rwCtx.fillRect(120, 0, 4, 512);
+        for(let i=10; i<118; i+=10) { rwCtx.fillRect(i, 20, 5, 80); rwCtx.fillRect(i, 412, 5, 80); }
+        const rwTex = new THREE.CanvasTexture(rwTexCanvas);
+        rwTex.wrapS = rwTex.wrapT = THREE.RepeatWrapping;
+        rwTex.repeat.set(1, 30); 
+        rwTex.anisotropy = maxAnisotropy;
+        const runwayMat = new THREE.MeshLambertMaterial({ map: rwTex });
+
+        const houseGeo = new THREE.BoxGeometry(0.5, 0.4, 0.6);
+        const houseMat = new THREE.MeshLambertMaterial({ flatShading: true });
+        const warehouseGeo = new THREE.BoxGeometry(3.0, 0.8, 4.0);
+        const warehouseMat = new THREE.MeshLambertMaterial({ color: 0xd0d0d0, flatShading: true });
+        const villaGeo = new THREE.BoxGeometry(0.8, 0.3, 0.8);
+        const villaMat = new THREE.MeshLambertMaterial({ color: 0xf5f5f5, flatShading: true });
+        const terminalMat = new THREE.MeshLambertMaterial({ color: 0x999999, flatShading: true });
+        const waterMat = new THREE.MeshStandardMaterial({ color: 0x1a3a5a, roughness: 0.1, metalness: 0.8, transparent: true, opacity: 0.85 });
+
+        const trunkGeo = new THREE.CylinderGeometry(0.04, 0.06, 0.4, 5);
+        const trunkMat = new THREE.MeshLambertMaterial({ color: 0x4a3a2a, flatShading: true });
+        const leafDeciduous = new THREE.SphereGeometry(0.3, 6, 6);
+        const leafPalm = new THREE.SphereGeometry(0.15, 5, 5);
+        const leafMat = new THREE.MeshLambertMaterial({ color: 0x2d5a27, flatShading: true });
+
+        function addRunway(x, z, length, width, heading) {
+            const rwMesh = new THREE.Mesh(new THREE.PlaneGeometry(width, length), runwayMat);
+            rwMesh.rotation.x = -Math.PI/2;
+            rwMesh.rotation.z = -heading * (Math.PI/180);
+            rwMesh.position.set(x, 0.01, z);
+            rwMesh.receiveShadow = true;
+            envGroup.add(rwMesh);
+        }
+
+        function addBuildings(type, cx, cz, count, radius) {
+            let geo, mat, colorFn, yOffset;
+            if (type === 'house') {
+                geo = houseGeo; mat = houseMat; yOffset = 0.2;
+                colorFn = () => [0x8b4513, 0xa0522d, 0xcd853f][Math.floor(Math.random()*3)];
+            } else if (type === 'warehouse') {
+                geo = warehouseGeo; mat = warehouseMat; yOffset = 0.4;
+            } else if (type === 'villa') {
+                geo = villaGeo; mat = villaMat; yOffset = 0.15;
+            }
+            const mesh = new THREE.InstancedMesh(geo, mat, count);
+            mesh.receiveShadow = true; mesh.castShadow = true;
+            const dummy = new THREE.Object3D();
+            const c = new THREE.Color();
+            for(let i=0; i<count; i++) {
+                const r = 10 + Math.random() * radius;
+                const theta = Math.random() * Math.PI * 2;
+                dummy.position.set(cx + Math.cos(theta)*r, yOffset, cz + Math.sin(theta)*r);
+                dummy.rotation.y = Math.random() * Math.PI;
+                dummy.updateMatrix();
+                mesh.setMatrixAt(i, dummy.matrix);
+                if (colorFn) mesh.setColorAt(i, c.setHex(colorFn()));
+            }
+            envGroup.add(mesh);
+        }
+
+        function addTrees(type, cx, cz, count, radius) {
+            const tMesh = new THREE.InstancedMesh(trunkGeo, trunkMat, count);
+            const leafGeo = type === 'palm' ? leafPalm : leafDeciduous;
+            const lMesh = new THREE.InstancedMesh(leafGeo, leafMat, type === 'bare' ? 0 : count);
+            tMesh.receiveShadow = true; tMesh.castShadow = true;
+            lMesh.receiveShadow = true; lMesh.castShadow = true;
+            
+            const dummy = new THREE.Object3D();
+            for(let i=0; i<count; i++) {
+                const r = 10 + Math.random() * radius;
+                const theta = Math.random() * Math.PI * 2;
+                const x = cx + Math.cos(theta)*r;
+                const z = cz + Math.sin(theta)*r;
+                dummy.position.set(x, 0.2, z);
+                if (type === 'palm') { dummy.scale.set(0.5, 2.0, 0.5); dummy.rotation.z = (Math.random()-0.5)*0.2; }
+                else { dummy.scale.setScalar(1); dummy.rotation.set(0,0,0); }
+                dummy.updateMatrix();
+                tMesh.setMatrixAt(i, dummy.matrix);
+                
+                if (type !== 'bare') {
+                    dummy.position.set(x, type === 'palm' ? 0.6 : 0.4, z);
+                    dummy.scale.setScalar(type === 'palm' ? 1.0 : 1.0 + Math.random());
+                    dummy.updateMatrix();
+                    lMesh.setMatrixAt(i, dummy.matrix);
+                }
+            }
+            envGroup.add(tMesh);
+            if (type !== 'bare') envGroup.add(lMesh);
+        }
+
+        function addTerminal(x, z, sx, sz, heading) {
+            const mesh = new THREE.Mesh(new THREE.BoxGeometry(sx, 1, sz), terminalMat);
+            mesh.position.set(x, 0.5, z);
+            mesh.rotation.y = -heading * (Math.PI/180);
+            mesh.receiveShadow = true; mesh.castShadow = true;
+            envGroup.add(mesh);
+        }
+
+        function addWater(x, z, w, h) {
+            const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w, h), waterMat);
+            mesh.rotation.x = -Math.PI/2;
+            mesh.position.set(x, 0.05, z);
+            envGroup.add(mesh);
+        }
+
+        function buildEnvironment(id) {
+            envGroup.clear();
+            if (isWinter) return;
+
+            switch(id) {
+                case 'SIN':
+                    addRunway(10, 80, 150, 3, 20); 
+                    addTerminal(20, 150, 20, 30, 20);
+                    addWater(-100, -50, 400, 200); 
+                    addTrees('palm', 0, 0, 60, 30);
+                    break;
+                case 'LHR':
+                    addRunway(-80, 0, 150, 3, 270); 
+                    addTerminal(-180, 20, 30, 40, 270);
+                    addBuildings('house', 30, 0, 150, 40);
+                    addTrees('deciduous', 20, 0, 50, 30);
+                    break;
+                case 'JFK':
+                    addRunway(60, 60, 150, 3, 130); 
+                    addRunway(50, 90, 150, 3, 220); 
+                    addTerminal(120, 120, 40, 20, 130);
+                    addWater(-80, -20, 300, 300); 
+                    addTrees('bare', 0, 0, 40, 25);
+                    break;
+                case 'HND':
+                    addRunway(-40, 80, 150, 3, 220); 
+                    addTerminal(20, 140, 50, 20, 220);
+                    addWater(100, -80, 400, 400); 
+                    addBuildings('warehouse', 40, -20, 40, 40);
+                    break;
+                case 'DXB':
+                    addRunway(60, 50, 150, 3, 120); 
+                    addRunway(70, 60, 150, 3, 120); 
+                    addTerminal(130, 110, 50, 15, 120);
+                    addBuildings('villa', -10, -10, 80, 40);
+                    addTrees('palm', 0, 0, 30, 20);
+                    break;
+            }
+        }
+
+        // --- Weather Particles ---
+        let particleSystem = null;
+        let particleVelocities = [];
+
+        function setWeatherParticles(type, isStorm = false) {
+            if (particleSystem) {
+                scene.remove(particleSystem);
+                particleSystem.geometry.dispose();
+                particleSystem.material.dispose();
+                particleSystem = null;
+                particleVelocities = [];
+            }
+            particleType = type;
+            if (type === 'none') return;
+
+            const count = type === 'rain' ? (isStorm ? 6000 : 3000) : 2000;
+            const geo = new THREE.BufferGeometry();
+            const positions = new Float32Array(count * 3);
+
+            for(let i=0; i<count; i++) {
+                positions[i*3] = (Math.random() - 0.5) * 100;
+                positions[i*3+1] = Math.random() * 50;
+                positions[i*3+2] = (Math.random() - 0.5) * 100;
+                
+                let yVel = -(2 + Math.random() * 2);
+                if (type === 'rain') {
+                    yVel = isStorm ? -(25 + Math.random() * 15) : -(15 + Math.random() * 10);
+                }
+                
+                particleVelocities.push({
+                    y: yVel,
+                    x: type === 'rain' ? -2 : (Math.random() - 0.5),
+                    z: type === 'snow' ? (Math.random() - 0.5) : 0
+                });
+            }
+            geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+
+            let pSize = 0.3;
+            if (type === 'rain') pSize = isStorm ? 0.35 : 0.2;
+
+            const mat = new THREE.PointsMaterial({
+                color: type === 'rain' ? 0xaaaaaa : 0xffffff, size: pSize,
+                transparent: true, opacity: type === 'rain' ? 0.5 : 0.8, sizeAttenuation: true
+            });
+            particleSystem = new THREE.Points(geo, mat);
+            scene.add(particleSystem);
+        }
+
+        function updateParticles(dt, t) {
+            if (!particleSystem) return;
+            const positions = particleSystem.geometry.attributes.position.array;
+            
+            for(let i=0; i < particleVelocities.length; i++) {
+                let px = positions[i*3], py = positions[i*3+1], pz = positions[i*3+2];
+                const vel = particleVelocities[i];
+
+                if (particleType === 'snow') {
+                    px += (vel.x + Math.sin(t + py)) * 2 * dt;
+                    pz += (vel.z + Math.cos(t + py)) * 2 * dt;
+                } else { px += vel.x * dt; }
+                py += vel.y * dt;
+
+                if (py < 0 || Math.abs(px - camera.position.x) > 50 || Math.abs(pz - camera.position.z) > 50) {
+                    py = 50; px = camera.position.x + (Math.random() - 0.5) * 100; pz = camera.position.z + (Math.random() - 0.5) * 100;
+                }
+                positions[i*3] = px; positions[i*3+1] = py; positions[i*3+2] = pz;
+            }
+            particleSystem.geometry.attributes.position.needsUpdate = true;
+        }
+
+        // --- Plane Geometry ---
+        const planeGeometryCache = new THREE.Group();
+        const bodyMat = new THREE.MeshLambertMaterial({ color: 0xffffff });
+        const darkMat = new THREE.MeshLambertMaterial({ color: 0x222222 });
+
+        const fuselageGeo = new THREE.SphereGeometry(0.7, 32, 16);
+        const fuselage = new THREE.Mesh(fuselageGeo, bodyMat);
+        fuselage.scale.set(1, 1, 7.5); 
+        planeGeometryCache.add(fuselage);
+
+        const lWingGeo = new THREE.BoxGeometry(4, 0.1, 2.5);
+        lWingGeo.translate(-2, 0, 0); 
+        const lWing = new THREE.Mesh(lWingGeo, bodyMat);
+        lWing.position.set(-0.7, -0.2, 0); 
+        lWing.rotation.y = Math.PI / 6; 
+        planeGeometryCache.add(lWing);
+        
+        const rWingGeo = new THREE.BoxGeometry(4, 0.1, 2.5);
+        rWingGeo.translate(2, 0, 0); 
+        const rWing = new THREE.Mesh(rWingGeo, bodyMat);
+        rWing.position.set(0.7, -0.2, 0); 
+        rWing.rotation.y = -Math.PI / 6; 
+        planeGeometryCache.add(rWing);
+
+        const vTailGeo = new THREE.BoxGeometry(0.2, 2.2, 1.8);
+        vTailGeo.translate(0, 1.1, 0); 
+        const vTail = new THREE.Mesh(vTailGeo, bodyMat);
+        vTail.position.set(0, 0.5, 4.0); 
+        vTail.rotation.x = Math.PI / 8; 
+        planeGeometryCache.add(vTail);
+
+        const lHTailGeo = new THREE.BoxGeometry(2, 0.1, 1.2);
+        lHTailGeo.translate(-1, 0, 0);
+        const lHTail = new THREE.Mesh(lHTailGeo, bodyMat);
+        lHTail.position.set(-0.3, 0.2, 4.5);
+        lHTail.rotation.y = Math.PI / 6; 
+        planeGeometryCache.add(lHTail);
+
+        const rHTailGeo = new THREE.BoxGeometry(2, 0.1, 1.2);
+        rHTailGeo.translate(1, 0, 0);
+        const rHTail = new THREE.Mesh(rHTailGeo, bodyMat);
+        rHTail.position.set(0.3, 0.2, 4.5);
+        rHTail.rotation.y = -Math.PI / 6; 
+        planeGeometryCache.add(rHTail);
+        
+        const engineGeo = new THREE.CylinderGeometry(0.4, 0.4, 1.5, 16); 
+        engineGeo.rotateX(Math.PI / 2);
+        const lEngine = new THREE.Mesh(engineGeo, darkMat); 
+        lEngine.position.set(-2.0, -0.6, 1.5); 
+        planeGeometryCache.add(lEngine);
+        
+        const rEngine = new THREE.Mesh(engineGeo, darkMat); 
+        rEngine.position.set(2.0, -0.6, 1.5); 
+        planeGeometryCache.add(rEngine);
+
+        const contrailGeo = new THREE.CylinderGeometry(0.1, 2.5, 150, 8, 1, true);
+        contrailGeo.translate(0, -75, 0); 
+        contrailGeo.rotateX(-Math.PI / 2); 
+        const contrailMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.15, depthWrite: false, blending: THREE.AdditiveBlending });
+        
+        const lContrail = new THREE.Mesh(contrailGeo, contrailMat);
+        lContrail.position.set(-2.0, -0.6, 2.25);
+        lContrail.name = "contrailL";
+        planeGeometryCache.add(lContrail);
+        
+        const rContrail = new THREE.Mesh(contrailGeo, contrailMat);
+        rContrail.position.set(2.0, -0.6, 2.25);
+        rContrail.name = "contrailR";
+        planeGeometryCache.add(rContrail);
+
+        const pathPlaneGeo = new THREE.PlaneGeometry(25, 8000);
+
+        // --- API & Data Handling ---
+        function setStatusBadge(status) {
+            const badge = document.getElementById('data-status-badge');
+            const text = document.getElementById('data-status-text');
+            if (status === 'live') {
+                badge.className = 'status-badge live'; text.textContent = 'LIVE';
+            } else if (status === 'sim') {
+                badge.className = 'status-badge sim'; text.textContent = 'SIMULATED';
+            } else if (status === 'empty') {
+                badge.className = 'status-badge empty'; text.textContent = 'NO TRAFFIC';
+            } else if (status === 'loading') {
+                badge.className = 'status-badge empty'; text.textContent = 'FETCHING...';
+            }
+        }
+
+        function updateLabelsSelection() {
+            activePlanes.forEach((p, icao) => {
+                if (icao === selectedIcao) {
+                    p.el.classList.add('expanded');
+                    p.el.style.zIndex = 100;
+                } else {
+                    p.el.classList.remove('expanded');
+                    p.el.style.zIndex = 10;
+                }
+            });
+        }
+
+        async function fetchWeather(lat, lon) {
+            try {
+                const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current_weather=true&daily=sunrise,sunset&timezone=auto`;
+                const res = await fetchWithTimeout(url, {}, 4000);
+                const data = res;
+                
+                if(data.daily && data.daily.sunrise && data.daily.sunset) {
+                    const parseIsoTime = (iso) => {
+                        const time = iso.split('T')[1];
+                        const [h, m] = time.split(':').map(Number);
+                        return h + (m / 60);
+                    };
+                    currentAirport.sunrise = parseIsoTime(data.daily.sunrise[0]);
+                    currentAirport.sunset = parseIsoTime(data.daily.sunset[0]);
+                }
+                
+                if(data.current_weather) {
+                    const cw = data.current_weather;
+                    weatherCodeState = cw.weathercode;
+                    document.getElementById('temp-display').textContent = Math.round(cw.temperature);
+                    
+                    let desc = "Clear"; isCloudy = false; pType = 'none';
+                    if (cw.weathercode > 0 && cw.weathercode <= 3) { desc = "Cloudy"; isCloudy = true; }
+                    if (cw.weathercode >= 45 && cw.weathercode <= 48) { desc = "Foggy"; isCloudy = true; }
+                    if ((cw.weathercode >= 51 && cw.weathercode <= 67) || (cw.weathercode >= 80 && cw.weathercode <= 82)) { desc = "Rain"; isCloudy = true; pType = 'rain'; }
+                    if ((cw.weathercode >= 71 && cw.weathercode <= 77) || (cw.weathercode >= 85 && cw.weathercode <= 86)) { desc = "Snow"; isCloudy = true; pType = 'snow'; }
+                    
+                    isStormActive = false;
+                    if (cw.weathercode >= 95) { desc = "Thunderstorm"; isCloudy = true; pType = 'rain'; isStormActive = true; }
+
+                    document.getElementById('weather-display').textContent = desc;
+                    generateClouds(isCloudy ? 25 : 6);
+                    setWeatherParticles(pType, isStormActive);
+                    
+                    isWinter = (pType === 'snow' || cw.temperature < 0);
+                    updateGroundVisuals();
+                }
+            } catch (e) {
+                logMsg(`Weather API offline. Using defaults.`, 'warn');
+                generateClouds(6);
+            }
+        }
+
+        function getAirlineName(callsign) {
+            if (!callsign || callsign === 'N/A' || callsign.length < 3) return "Private / Unknown Carrier";
+            const code = callsign.substring(0, 3).toUpperCase();
+            return AIRLINE_MAP[code] || "Private / Unknown Carrier";
+        }
+
+        function createOrUpdatePlane(icao, callsign, lat2, lng, alt, velocity, heading) {
+            const x = (lng - currentAirport.lon) * 111320 * SCALE;
+            const z = -(lat2 - currentAirport.lat) * 111320 * SCALE; 
+            const y = Math.max(alt * SCALE, 10);
+            
+            const dispCallsign = callsign && callsign !== 'N/A' && callsign.trim() !== '' ? callsign.trim() : 'UNKNOWN';
+            const hexStr = icao.toUpperCase();
+            const airlineName = getAirlineName(dispCallsign);
+            const isHighAlt = alt >= 8000; 
+
+            if (activePlanes.has(icao)) {
+                const p = activePlanes.get(icao);
+                p.targetPos.set(x, y, z);
+                p.velocity = velocity;
+                p.heading = heading;
+                p.lastUpdate = performance.now();
+                
+                p.mesh.getObjectByName("contrailL").visible = isHighAlt;
+                p.mesh.getObjectByName("contrailR").visible = isHighAlt;
+
+                p.el.querySelector('.alt-val').textContent = Math.round(alt);
+                p.el.querySelector('.spd-val').textContent = Math.round(velocity * 1.94384);
+                p.el.querySelector('.hdg-val').textContent = Math.round(heading);
+            } else {
+                const mesh = planeGeometryCache.clone();
+                mesh.position.set(x, y, z);
+                mesh.rotation.y = -heading * (Math.PI / 180);
+                mesh.userData = { icao: icao }; 
+
+                const hash = icao.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+                const scaleMod = 0.6 + ((hash % 100) / 100) * 0.7;
+                mesh.scale.setScalar(scaleMod);
+                
+                mesh.getObjectByName("contrailL").visible = isHighAlt;
+                mesh.getObjectByName("contrailR").visible = isHighAlt;
+                
+                mesh.castShadow = true;
+                mesh.receiveShadow = true;
+
+                scene.add(mesh);
+
+                const colorHex = PATH_COLORS[hash % PATH_COLORS.length];
+                const pathMat = new THREE.MeshBasicMaterial({ 
+                    color: colorHex, 
+                    transparent: true, 
+                    opacity: 0.6, 
+                    side: THREE.DoubleSide,
+                    depthWrite: false,
+                    blending: THREE.AdditiveBlending 
+                });
+                const pathLine = new THREE.Mesh(pathPlaneGeo, pathMat);
+                pathLine.rotation.x = -Math.PI / 2; 
+                pathLine.position.y = -10; 
+                pathLine.visible = showPaths;
+                mesh.add(pathLine);
+
+                const el = document.createElement('div');
+                el.className = 'plane-label';
+                if (icao === selectedIcao) el.classList.add('expanded');
+                
+                el.innerHTML = `
+                    <div class="plane-header">
+                        <span class="icao-badge">${hexStr.substring(0,4)}</span>
+                        <div class="plane-callsign">${dispCallsign}</div>
+                        <div class="plane-metrics">
+                            <span>A:<span class="alt-val">${Math.round(alt)}</span>m</span>
+                            <span>S:<span class="spd-val">${Math.round(velocity * 1.94384)}</span>kt</span>
+                        </div>
+                    </div>
+                    <div class="plane-details">
+                        <span class="hud-airline">${airlineName}</span>
+                        <span class="hud-primary">HDG: <span class="hdg-val">${Math.round(heading)}</span>°</span>
+                        <span class="hud-secondary">HEX: ${hexStr}</span>
+                    </div>
+                `;
+                
+                el.addEventListener('pointerdown', (e) => {
+                    e.stopPropagation();
+                    selectedIcao = (selectedIcao === icao) ? null : icao;
+                    updateLabelsSelection();
+                });
+
+                document.getElementById('labels-container').appendChild(el);
+                activePlanes.set(icao, { mesh, el, pathLine, targetPos: new THREE.Vector3(x, y, z), velocity, heading, alt });
+            }
+        }
+
+        function injectMockData() {
+            usingMockData = true;
+            setStatusBadge('sim');
+            const carriers = ['UAE', 'SIA', 'BAW', 'UAL', 'QFA', 'JAL', 'DAL', 'AFR'];
+            
+            for (let i = 0; i < 15; i++) {
+                const icao = Math.random().toString(16).substring(2, 8).toUpperCase();
+                const callsign = carriers[i % carriers.length] + Math.floor(Math.random() * 900 + 100);
+                const latOff = (Math.random() - 0.5) * 0.05;
+                const lngOff = (Math.random() - 0.5) * 0.05;
+                const alt = i % 3 === 0 ? 8500 + Math.random() * 2000 : 200 + Math.random() * 800;
+                const vel = 80 + Math.random() * 100;
+                const hdg = Math.random() * 360;
+                
+                createOrUpdatePlane(icao, callsign, currentAirport.lat + latOff, currentAirport.lon + lngOff, alt, vel, hdg);
+            }
+        }
+
+        async function fetchFlights(force = false) {
+            if (!currentAirport || (usingMockData && !force)) return true;
+            const lat = currentAirport.lat;
+            const lon = currentAirport.lon;
+            const offset = 0.5;
+            const url = `https://opensky-network.org/api/states/all?lamin=${lat-offset}&lomin=${lon-offset}&lamax=${lat+offset}&lomax=${lon+offset}`;
+
+            try {
+                const data = await fetchWithTimeout(url, {}, 4000);
+                
+                const receivedIcaos = new Set();
+                let count = 0;
+                
+                if (data.states) {
+                    data.states.forEach(state => {
+                        const [icao, callsign, , , , lng, lat2, baro_alt, on_ground, velocity, heading, , , geo_alt] = state;
+                        const alt = baro_alt || geo_alt || 0;
+                        if (lng === null || lat2 === null || on_ground) return;
+                        receivedIcaos.add(icao);
+                        createOrUpdatePlane(icao, callsign, lat2, lng, alt, velocity || 0, heading || 0);
+                        count++;
+                    });
+                }
+                
+                for (const [icao, p] of activePlanes.entries()) {
+                    if (!receivedIcaos.has(icao)) {
+                        scene.remove(p.mesh); p.el.remove(); activePlanes.delete(icao);
+                        if (selectedIcao === icao) selectedIcao = null;
+                    }
+                }
+                
+                setStatusBadge(count > 0 ? 'live' : 'empty');
+                return true;
+            } catch (e) {
+                logMsg(`OpenSky API connection failed or timed out.`, 'error');
+                return false;
+            }
+        }
+
+        function clearAirspace() {
+            activePlanes.forEach(p => { 
+                scene.remove(p.mesh); 
+                p.el.remove(); 
+                if(p.pathLine) { p.pathLine.material.dispose(); }
+            });
+            activePlanes.clear();
+            selectedIcao = null;
+        }
+
+        async function toggleDataMode() {
+            if (fetchIntervalId) { clearInterval(fetchIntervalId); fetchIntervalId = null; }
+            clearAirspace();
+
+            if (usingMockData) {
+                setStatusBadge('loading');
+                usingMockData = false;
+                const success = await fetchFlights(true);
+                if (!success) {
+                    injectMockData();
+                } else {
+                    fetchIntervalId = setInterval(fetchFlights, 10000);
+                }
+            } else {
+                injectMockData();
+            }
+        }
+
+        function togglePaths() {
+            showPaths = !showPaths;
+            const btn = document.getElementById('path-toggle');
+            btn.textContent = showPaths ? 'PATHS: ON' : 'PATHS: OFF';
+            btn.classList.toggle('active', showPaths);
+            activePlanes.forEach(p => { if (p.pathLine) p.pathLine.visible = showPaths; });
+        }
+
+        function setStance(heightUnits, btnId) {
+            targetCamY = heightUnits;
+            document.querySelectorAll('.stance-btn').forEach(b => b.classList.remove('active'));
+            document.getElementById(btnId).classList.add('active');
+        }
+
+        // --- Interaction Controls ---
+        let isDragging = false;
+        let prevMouse = { x: 0, y: 0 };
+        let camYaw = 0; 
+        let camPitch = Math.PI / 6; 
+
+        function updateCameraRotation() {
+            camera.rotation.y = camYaw; camera.rotation.x = camPitch;
+        }
+        updateCameraRotation();
+
+        function handlePointerDown(e) {
+            isDragging = true;
+            const x = e.touches ? e.touches[0].pageX : e.clientX;
+            const y = e.touches ? e.touches[0].pageY : e.clientY;
+            prevMouse = { x, y };
+        }
+        
+        function handlePointerMove(e) {
+            if (!isDragging) return;
+            const current = { x: e.touches ? e.touches[0].pageX : e.clientX, y: e.touches ? e.touches[0].pageY : e.clientY };
+            camYaw += (current.x - prevMouse.x) * 0.003;
+            camPitch += (current.y - prevMouse.y) * 0.003;
+            camPitch = Math.max(-0.05, Math.min(Math.PI / 2.1, camPitch)); 
+            updateCameraRotation();
+            prevMouse = current;
+        }
+        
+        function handlePointerUp(e) {
+            isDragging = false;
+        }
+
+        container.addEventListener('pointerdown', handlePointerDown);
+        window.addEventListener('pointermove', handlePointerMove, { passive: false });
+        window.addEventListener('pointerup', handlePointerUp);
+        document.getElementById('data-status-badge').addEventListener('click', toggleDataMode);
+        document.getElementById('path-toggle').addEventListener('click', togglePaths);
+
+        document.getElementById('stance-sit').addEventListener('click', () => setStance(0.05, 'stance-sit'));
+        document.getElementById('stance-lie').addEventListener('click', () => setStance(0.015, 'stance-lie'));
+
+        // Weather Toggle Debug Command (Ctrl + Cmd + R)
+        window.addEventListener('keydown', (e) => {
+            if (e.ctrlKey && e.metaKey && e.key.toLowerCase() === 'r') {
+                e.preventDefault();
+                if (weatherCodeState < 50) {
+                    weatherCodeState = 61; // Rain
+                    isCloudy = true;
+                    isStormActive = false;
+                    document.getElementById('weather-display').textContent = 'Rain (Debug)';
+                    generateClouds(25);
+                    setWeatherParticles('rain', false);
+                } else if (weatherCodeState >= 50 && weatherCodeState < 90) {
+                    weatherCodeState = 95; // Thunderstorm
+                    isCloudy = true;
+                    isStormActive = true;
+                    document.getElementById('weather-display').textContent = 'Storm (Debug)';
+                    generateClouds(25);
+                    setWeatherParticles('rain', true);
+                } else {
+                    weatherCodeState = 0; // Clear
+                    isCloudy = false;
+                    isStormActive = false;
+                    document.getElementById('weather-display').textContent = 'Clear (Debug)';
+                    generateClouds(6);
+                    setWeatherParticles('none');
+                }
+                updateGroundVisuals();
+            }
+        });
+
+        // --- Main Loop ---
+        function animate() {
+            animationFrameId = requestAnimationFrame(animate);
+            const now = performance.now();
+            const dt = (now - lastTimestamp) / 1000;
+            const timeSeconds = now * 0.001;
+            lastTimestamp = now;
+
+            camera.position.y += (targetCamY - camera.position.y) * 5 * dt;
+
+            let localHour = 12; 
+            if (currentAirport) {
+                try {
+                    const formatter = new Intl.DateTimeFormat('en-GB', { 
+                        timeZone: currentAirport.tz, 
+                        hour: '2-digit', minute: '2-digit', 
+                        hourCycle: 'h23'
+                    });
+                    const parts = formatter.formatToParts(new Date());
+                    let hStr = "00", mStr = "00";
+                    let hNum = 12, mNum = 0;
+                    for (const part of parts) {
+                        if (part.type === 'hour') {
+                            hStr = part.value;
+                            hNum = parseInt(part.value, 10);
+                        }
+                        if (part.type === 'minute') {
+                            mStr = part.value;
+                            mNum = parseInt(part.value, 10);
+                        }
+                    }
+                    if (hNum === 24) { hStr = "00"; hNum = 0; }
+                    document.getElementById('time-display').textContent = `${hStr}:${mStr}`;
+                    localHour = hNum + (mNum / 60);
+                } catch(e) {}
+            }
+            
+            // Lightning Logic
+            if (isStormActive && Math.random() < 0.005 && lightningFrames <= 0) {
+                const lx = camera.position.x + (Math.random() - 0.5) * 4000;
+                const lz = camera.position.z + (Math.random() - 0.5) * 4000;
+                createLightning(lx, lz);
+                lightningFrames = 4;
+                
+                const localPos = new THREE.Vector3(lx, 0, lz);
+                camera.worldToLocal(localPos);
+                const pan = Math.max(-1, Math.min(1, localPos.x / 2000));
+                
+                setTimeout(() => { playThunder(pan); }, (0.5 + Math.random() * 1.5) * 1000);
+            }
+
+            if (lightningFrames > 0) {
+                lightningFrames--;
+                lightningFlash = 1.0;
+                if (lightningFrames === 0 && lightningMesh) {
+                    scene.remove(lightningMesh);
+                    lightningMesh.geometry.dispose();
+                    lightningMesh.material.dispose();
+                    lightningMesh = null;
+                }
+            } else {
+                lightningFlash = Math.max(0, lightningFlash - 0.1);
+            }
+
+            updateSkyAndLighting(localHour);
+
+            if (starLayer1 && starLayer2) {
+                starLayer1.rotation.y += 0.0035 * dt;
+                starLayer1.rotation.z += 0.00175 * dt;
+                starLayer2.rotation.y += 0.007 * dt;
+                starLayer2.rotation.z += 0.0035 * dt;
+            }
+
+            if (distantCloudMesh && distantCloudMesh.material.uniforms.uOpacity.value > 0) {
+                distantCloudMesh.material.uniforms.uTime.value = timeSeconds;
+            }
+
+            if (grassMesh && grassMesh.visible) {
+                grassUniforms.uTime.value = timeSeconds;
+            }
+
+            if (isDaytime && birdMesh) {
+                if (!flockActive) {
+                    flockSpawnTimer -= dt;
+                    if (flockSpawnTimer <= 0) {
+                        flockActive = true;
+                        const angle = Math.random() * Math.PI * 2;
+                        const r = 250; 
+                        flockCenter.set(Math.cos(angle) * r, 5 + Math.random() * 10, Math.sin(angle) * r);
+                        flockTarget.set(Math.cos(angle + Math.PI) * r, 5 + Math.random() * 10, Math.sin(angle + Math.PI) * r);
+                        flockProgress = 0;
+                    }
+                } else {
+                    flockProgress += dt * 0.016; 
+                    if (flockProgress >= 1) {
+                        flockActive = false;
+                        flockSpawnTimer = 60 + Math.random() * 120; 
+                        birdMesh.material.opacity = 0;
+                    } else {
+                        const currentX = THREE.MathUtils.lerp(flockCenter.x, flockTarget.x, flockProgress);
+                        const currentY = THREE.MathUtils.lerp(flockCenter.y, flockTarget.y, flockProgress) + Math.sin(flockProgress * Math.PI * 2) * 1.5;
+                        const currentZ = THREE.MathUtils.lerp(flockCenter.z, flockTarget.z, flockProgress);
+                        
+                        const dirX = flockTarget.x - flockCenter.x;
+                        const dirZ = flockTarget.z - flockCenter.z;
+                        const heading = Math.atan2(dirX, dirZ);
+
+                        const dummy = new THREE.Object3D();
+                        for(let i=0; i<BIRD_COUNT; i++) {
+                            const b = birdOffsets[i];
+                            const ox = Math.sin(timeSeconds * b.speed + b.phase) * b.x;
+                            const oy = Math.cos(timeSeconds * b.speed * 0.8 + b.phase) * b.y;
+                            const oz = Math.sin(timeSeconds * b.speed * 1.2 + b.phase) * b.z;
+                            
+                            dummy.position.set(currentX + ox, currentY + oy, currentZ + oz);
+                            dummy.rotation.y = heading + Math.sin(timeSeconds * 2 + b.phase) * 0.2; 
+                            dummy.updateMatrix();
+                            birdMesh.setMatrixAt(i, dummy.matrix);
+                        }
+                        birdMesh.instanceMatrix.needsUpdate = true;
+                        birdUniforms.uTime.value = timeSeconds;
+
+                        const distToCam = Math.sqrt(currentX*currentX + currentZ*currentZ);
+                        const opacity = Math.max(0, Math.min(1, (250 - distToCam) / 50));
+                        birdMesh.material.opacity = opacity;
+
+                        const maxBirdAudioDist = 50; 
+                        if (distToCam < maxBirdAudioDist && Math.random() < 0.04) {
+                            const localPos = new THREE.Vector3(currentX, currentY, currentZ);
+                            camera.worldToLocal(localPos);
+                            const pan = Math.max(-1, Math.min(1, localPos.x / maxBirdAudioDist));
+                            const volScale = 1.0 - (distToCam / maxBirdAudioDist);
+                            playBirdChirp(pan, volScale);
+                        }
+                    }
+                }
+            } else if (birdMesh) {
+                birdMesh.material.opacity = 0;
+                flockActive = false;
+            }
+
+            if (particleSystem) {
+                const positions = particleSystem.geometry.attributes.position.array;
+                for(let i=0; i < particleVelocities.length; i++) {
+                    let px = positions[i*3], py = positions[i*3+1], pz = positions[i*3+2];
+                    const vel = particleVelocities[i];
+
+                    if (particleType === 'snow') {
+                        px += (vel.x + Math.sin(timeSeconds + py)) * 2 * dt;
+                        pz += (vel.z + Math.cos(timeSeconds + py)) * 2 * dt;
+                    } else { px += vel.x * dt; }
+                    py += vel.y * dt;
+
+                    if (py < 0 || Math.abs(px - camera.position.x) > 50 || Math.abs(pz - camera.position.z) > 50) {
+                        py = 50; px = camera.position.x + (Math.random() - 0.5) * 100; pz = camera.position.z + (Math.random() - 0.5) * 100;
+                    }
+                    positions[i*3] = px; positions[i*3+1] = py; positions[i*3+2] = pz;
+                }
+                particleSystem.geometry.attributes.position.needsUpdate = true;
+            }
+
+            cloudMeshes.forEach(c => {
+                c.mesh.position.x += c.speed * dt;
+                if (c.mesh.position.x > 4000) c.mesh.position.x = -4000;
+            });
+
+            let closestDist = Infinity;
+            let closestPan = 0;
+
+            activePlanes.forEach((p, icao) => {
+                const speedScale = p.velocity * SCALE;
+                const rad = p.heading * (Math.PI / 180);
+                
+                p.mesh.position.x += Math.sin(rad) * speedScale * dt;
+                p.mesh.position.z += -Math.cos(rad) * speedScale * dt;
+                p.mesh.rotation.y = -rad;
+
+                if (usingMockData) { 
+                    if (p.mesh.position.length() > 3000) p.mesh.position.copy(p.targetPos);
+                }
+
+                const distToCam = p.mesh.position.distanceTo(camera.position);
+                if (distToCam < closestDist) {
+                    closestDist = distToCam;
+                    const localPos = p.mesh.position.clone();
+                    camera.worldToLocal(localPos);
+                    closestPan = Math.max(-1, Math.min(1, localPos.x / 100));
+                }
+
+                const proj = p.mesh.position.clone();
+                proj.project(camera);
+
+                if (proj.z > 1) {
+                    p.el.classList.remove('visible');
+                } else {
+                    p.el.classList.add('visible');
+                    const x = (proj.x * 0.5 + 0.5) * window.innerWidth;
+                    const y = (-(proj.y * 0.5) + 0.5) * window.innerHeight;
+                    p.el.style.transform = `translate(calc(${x}px - 50%), calc(${y}px + 45px))`;
+                    
+                    if (selectedIcao === icao) {
+                        p.el.style.opacity = '1';
+                    } else {
+                        p.el.style.opacity = distToCam > 1500 ? '0.2' : (distToCam > 800 ? '0.6' : '1');
+                    }
+                }
+            });
+
+            updateAudio(timeSeconds, closestDist, closestPan);
+
+            let degrees = (camYaw * 180 / Math.PI) % 360;
+            if (degrees < 0) degrees += 360;
+            document.getElementById('compass-dial').style.transform = `rotate(${degrees}deg)`;
+            const headingNum = Math.round(360 - degrees) % 360;
+            document.getElementById('heading-display').textContent = `${headingNum === 0 ? 360 : headingNum}°`;
+
+            renderer.render(scene, camera);
+        }
+
+        // --- View Management ---
+        document.getElementById('start-btn').addEventListener('click', async () => {
+            const btn = document.getElementById('start-btn');
+            btn.disabled = true;
+            btn.textContent = "Connecting...";
+            consoleEl.innerHTML = ''; 
+
+            initAudio();
+
+            const selector = document.getElementById('setup-airport');
+            const opt = selector.options[selector.selectedIndex];
+            currentAirport = {
+                id: opt.value, name: opt.dataset.name,
+                lat: parseFloat(opt.dataset.lat), lon: parseFloat(opt.dataset.lon),
+                tz: opt.dataset.tz
+            };
+            currentEnvType = opt.dataset.env || 'grass';
+            
+            document.getElementById('ui-airport-name').textContent = `${currentAirport.name}`;
+
+            logMsg(`Fetching local weather for ${currentAirport.id}...`);
+            await fetchWeather(currentAirport.lat, currentAirport.lon);
+            updateGroundVisuals();
+            buildEnvironment(currentAirport.id);
+
+            logMsg(`Connecting to OpenSky Network ADS-B...`);
+            usingMockData = false;
+            const success = await fetchFlights(true);
+
+            if (!success) {
+                logMsg(`CORS or Rate Limit blocked request.`, 'warn');
+                logMsg(`Injecting simulated test traffic instead.`, 'normal');
+                injectMockData();
+            } else {
+                logMsg(`Data link established.`, 'success');
+            }
+
+            logMsg(`Entering simulation...`);
+            
+            setTimeout(() => {
+                document.getElementById('start-screen').style.opacity = '0';
+                document.getElementById('start-screen').style.pointerEvents = 'none';
+                document.getElementById('ui-layer').style.opacity = '1';
+                
+                lastTimestamp = performance.now();
+                if (!animationFrameId) animate();
+                if (!usingMockData && !fetchIntervalId) fetchIntervalId = setInterval(fetchFlights, 10000); 
+            }, 800);
+        });
+
+        document.getElementById('back-btn').addEventListener('click', () => {
+            if (animationFrameId) { cancelAnimationFrame(animationFrameId); animationFrameId = null; }
+            if (fetchIntervalId) { clearInterval(fetchIntervalId); fetchIntervalId = null; }
+            suspendAudio();
+            clearAirspace();
+
+            const btn = document.getElementById('start-btn');
+            btn.disabled = false; btn.textContent = "Connect & Enter";
+            
+            document.getElementById('ui-layer').style.opacity = '0';
+            document.getElementById('start-screen').style.opacity = '1';
+            document.getElementById('start-screen').style.pointerEvents = 'auto';
+            
+            camYaw = 0; camPitch = Math.PI / 6;
+            updateCameraRotation();
+        });
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>
