@@ -244,6 +244,7 @@
         const strobeMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0 });
         const runwayLightMat = new THREE.MeshBasicMaterial({ color: 0xffeeaa, transparent: true, opacity: 0 });
         const terminalMat = new THREE.MeshLambertMaterial({ color: 0x999999, flatShading: true });
+        const waterMat = new THREE.MeshLambertMaterial({ color: 0x1b364a, transparent: true, opacity: 0.95 });
 
         const PATH_COLORS = [0xFF2A55, 0x2AFF55, 0x2A88FF, 0xFFD700, 0x00E5FF, 0xAA00FF];
         const PATH_MATERIALS = PATH_COLORS.map(cHex => new THREE.MeshBasicMaterial({ 
@@ -1111,6 +1112,30 @@
         const leafPalm = new THREE.SphereGeometry(0.15, 5, 5);
         const leafMat = new THREE.MeshLambertMaterial({ color: 0x2d5a27, flatShading: true });
 
+        function addWater(lat, lon, width, length, headingDeg) {
+            const x = (lon - currentAirport.lon) * 111320 * SCALE;
+            const z = -(lat - currentAirport.lat) * 111320 * SCALE;
+            
+            const rwGroup = new THREE.Group();
+            rwGroup.position.set(x, 0.005, z);
+            rwGroup.rotation.y = headingDeg * (Math.PI/180);
+
+            const pGeo = new THREE.PlaneGeometry(width, length);
+            const mesh = new THREE.Mesh(pGeo, waterMat);
+            mesh.rotation.x = -Math.PI/2;
+            mesh.receiveShadow = true;
+            mesh.userData.disposeGeometry = true; 
+            rwGroup.add(mesh);
+
+            const dummyBox = new THREE.Object3D();
+            dummyBox.position.set(x, 0, z);
+            dummyBox.rotation.y = headingDeg * (Math.PI/180);
+            dummyBox.updateMatrixWorld();
+            exclusionZones.push({ inverseMat: dummyBox.matrixWorld.clone().invert(), width: width, length: length });
+
+            envGroup.add(rwGroup);
+        }
+
         function addDynamicRunway(lat1, lon1, lat2, lon2, width = 3) {
             const x1 = (lon1 - currentAirport.lon) * 111320 * SCALE;
             const z1 = -(lat1 - currentAirport.lat) * 111320 * SCALE;
@@ -1305,6 +1330,7 @@
 
             switch(id) {
                 case 'SIN':
+                    addWater(1.3600, 104.0800, 600, 600, 0); 
                     addDynamicRunway(1.3440, 103.9825, 1.3795, 103.9922); 
                     addDynamicRunway(1.3394, 103.9880, 1.3750, 103.9976); 
                     addDynamicRunway(1.3283, 104.0084, 1.3644, 104.0182); 
@@ -1319,6 +1345,7 @@
                     addTrees('deciduous', 0, 0, 50, 40);
                     break;
                 case 'JFK':
+                    addWater(40.5600, -73.8000, 600, 600, 0); 
                     addDynamicRunway(40.6247, -73.7844, 40.6475, -73.7663); 
                     addDynamicRunway(40.6234, -73.7698, 40.6461, -73.7548); 
                     addDynamicRunway(40.6552, -73.7915, 40.6358, -73.7610); 
@@ -1327,6 +1354,7 @@
                     addTrees('bare', 0, 0, 80, 50); 
                     break;
                 case 'HND':
+                    addWater(35.5000, 139.8500, 800, 800, 45); 
                     addDynamicRunway(35.5683, 139.7946, 35.5415, 139.8033); 
                     addDynamicRunway(35.5614, 139.7820, 35.5342, 139.7909); 
                     addDynamicRunway(35.5402, 139.7712, 35.5583, 139.7925); 
@@ -1602,7 +1630,6 @@
             if (activePlanes.has(icao)) {
                 const p = activePlanes.get(icao);
                 p.targetPos.set(x, y, z);
-                p.worldPos.set(x, y, z); 
                 p.velocity = velocity;
                 p.heading = heading;
                 p.lastUpdate = performance.now();
