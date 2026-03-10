@@ -267,6 +267,9 @@
         let flockTarget = new THREE.Vector3();
         let flockProgress = 0;
         const birdOffsets = [];
+        
+        // Contrail Uniforms
+        const contrailUniforms = { uTime: { value: 0 } };
 
         const AIRLINE_MAP = {
             "AAL": "American Airlines", "UAL": "United Airlines", "DAL": "Delta Air Lines", "SWA": "Southwest Airlines",
@@ -1451,7 +1454,7 @@
             particleSystem.geometry.attributes.position.needsUpdate = true;
         }
 
-        // --- Plane Geometry ---
+        // --- Plane Geometry & Shaders ---
         const planeGeometryCache = new THREE.Group();
         const bodyMat = new THREE.MeshPhongMaterial({ color: 0xb0b0b0, specular: 0x555555, shininess: 30 });
         const darkMat = new THREE.MeshPhongMaterial({ color: 0x222222, specular: 0x111111, shininess: 10 });
@@ -1517,7 +1520,49 @@
         const contrailGeo = new THREE.CylinderGeometry(0.1, 2.5, 150, 8, 1, true);
         contrailGeo.translate(0, -75, 0); 
         contrailGeo.rotateX(-Math.PI / 2); 
-        const contrailMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.15, depthWrite: false, blending: THREE.AdditiveBlending });
+        
+        const contrailMat = new THREE.ShaderMaterial({
+            uniforms: contrailUniforms,
+            vertexShader: `
+                varying vec2 vUv;
+                void main() {
+                    vUv = uv;
+                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                }
+            `,
+            fragmentShader: `
+                uniform float uTime;
+                varying vec2 vUv;
+
+                float hash(vec2 p) { return fract(1e4 * sin(17.0 * p.x + p.y * 0.1) * (0.1 + abs(sin(p.y * 13.0 + p.x)))); }
+                float noise(vec2 x) {
+                    vec2 i = floor(x);
+                    vec2 f = fract(x);
+                    float a = hash(i);
+                    float b = hash(i + vec2(1.0, 0.0));
+                    float c = hash(i + vec2(0.0, 1.0));
+                    float d = hash(i + vec2(1.0, 1.0));
+                    vec2 u = f * f * (3.0 - 2.0 * f);
+                    return mix(a, b, u.x) + (c - a) * u.y * (1.0 - u.x) + (d - b) * u.x * u.y;
+                }
+
+                void main() {
+                    vec2 st = vec2(vUv.x * 4.0, vUv.y * 8.0 + uTime * 4.0);
+                    float n = noise(st + noise(st * 2.0));
+                    
+                    float lengthFade = smoothstep(0.0, 0.9, vUv.y);
+                    float edgeSoftness = sin(vUv.x * 3.14159);
+                    
+                    float alpha = n * lengthFade * edgeSoftness * 0.5;
+                    
+                    gl_FragColor = vec4(1.0, 1.0, 1.0, alpha);
+                }
+            `,
+            transparent: true,
+            depthWrite: false,
+            blending: THREE.AdditiveBlending,
+            side: THREE.DoubleSide
+        });
         
         const lContrail = new THREE.Mesh(contrailGeo, contrailMat);
         lContrail.position.set(-2.0, -0.6, 2.25);
@@ -1932,8 +1977,8 @@
 
             // Lightning Logic
             if (isStormActive && Math.random() < 0.005 && lightningFrames <= 0) {
-                const lx = camWorldPos.x + (Math.random() - 0.5) * 4000;
-                const lz = camWorldPos.z + (Math.random() - 0.5) * 4000;
+                const lx = camera.position.x + (Math.random() - 0.5) * 4000;
+                const lz = camera.position.z + (Math.random() - 0.5) * 4000;
                 createLightning(lx, lz);
                 lightningFrames = 4;
                 
@@ -1972,6 +2017,8 @@
             if (grassMesh && grassMesh.visible) {
                 grassUniforms.uTime.value = timeSeconds;
             }
+            
+            contrailUniforms.uTime.value = timeSeconds;
 
             // Night Lighting Updates
             if (!isDaytime || isCloudy) {
