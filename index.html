@@ -538,7 +538,7 @@
         const container = document.getElementById('canvas-container');
         const scene = new THREE.Scene();
         
-        // Corrected Fog density calculation to compensate for 0.05x camera rig scaling
+        // Fog density must compensate for 0.05x camera rig scale
         scene.fog = new THREE.FogExp2(0x87CEEB, 0.0006 * SCALE);
 
         const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 150000);
@@ -551,7 +551,11 @@
         scene.add(cameraRig);
         cameraRig.add(camera);
 
-        const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+        const renderer = new THREE.WebGLRenderer({ 
+            antialias: true, 
+            powerPreference: "high-performance",
+            logarithmicDepthBuffer: true // Eliminates z-fighting at extreme scaled draw distances
+        });
         renderer.setSize(window.innerWidth, window.innerHeight);
         renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
         
@@ -581,6 +585,11 @@
                     const session = await navigator.xr.requestSession('immersive-vr', {
                         optionalFeatures: ['local-floor', 'bounded-floor']
                     });
+                    
+                    // WebXR resets the projection matrix near/far planes by default (usually far=1000).
+                    // Since our rig is scaled down to 0.05, a far plane of 1000 clips everything past 50 world units.
+                    session.updateRenderState({ depthNear: 0.1, depthFar: 150000 });
+                    
                     renderer.xr.setSession(session);
                     xrSession = session;
                     session.addEventListener('end', () => { xrSession = null; });
@@ -602,9 +611,7 @@
         dirLight.shadow.camera.bottom = -d;
         dirLight.shadow.camera.near = 10;
         dirLight.shadow.camera.far = 15000;
-        dirLight.shadow.mapSize.width = 2048;
-        dirLight.shadow.mapSize.height = 2048;
-        dirLight.shadow.bias = -0.0005; 
+        dirLight.shadow.bias = -0.002; // Increased bias headroom
         scene.add(dirLight);
 
         const envGroup = new THREE.Group();
@@ -996,7 +1003,6 @@
             skyContext.fillRect(0, 0, 2, 512);
             skyTexture.needsUpdate = true;
             
-            // Scaled fog density to correct for 0.05x camera rig shrinking
             scene.fog.color.setStyle(botColor);
             scene.fog.density = (isCloudy ? 0.0012 : 0.0006) * SCALE;
             if (weatherCodeState >= 45 && weatherCodeState <= 48) scene.fog.density = 0.005 * SCALE; 
@@ -1139,7 +1145,7 @@
 
             grassMesh = new THREE.InstancedMesh(bladeGeo, bladeMat, GRASS_COUNT);
             grassMesh.receiveShadow = true; 
-            grassMesh.castShadow = true;
+            grassMesh.castShadow = false; 
 
             const dummy = new THREE.Object3D();
             for (let i = 0; i < GRASS_COUNT; i++) {
@@ -1915,7 +1921,6 @@
                 const localPos = new THREE.Vector3(lx, 0, lz);
                 camera.worldToLocal(localPos);
                 
-                // Corrected audio panning with SCALE
                 const pan = Math.max(-1, Math.min(1, (localPos.x * SCALE) / 2000));
                 
                 setTimeout(() => { playThunder(pan); }, (0.5 + Math.random() * 1.5) * 1000);
@@ -2020,7 +2025,6 @@
                         if (distToCam < maxBirdAudioDist && Math.random() < 0.04) {
                             const localPos = new THREE.Vector3(currentX, currentY, currentZ);
                             camera.worldToLocal(localPos);
-                            // Corrected audio panning with SCALE
                             const pan = Math.max(-1, Math.min(1, (localPos.x * SCALE) / maxBirdAudioDist));
                             const volScale = 1.0 - (distToCam / maxBirdAudioDist);
                             playBirdChirp(pan, volScale);
@@ -2059,7 +2063,6 @@
                     closestDist = distToCam;
                     const localPos = p.mesh.position.clone();
                     camera.worldToLocal(localPos);
-                    // Corrected audio panning with SCALE
                     closestPan = Math.max(-1, Math.min(1, (localPos.x * SCALE) / 100));
                 }
 
