@@ -537,25 +537,20 @@
         // --- Three.js Setup ---
         const container = document.getElementById('canvas-container');
         const scene = new THREE.Scene();
-        
-        // Fog density must compensate for 0.05x camera rig scale
-        scene.fog = new THREE.FogExp2(0x87CEEB, 0.0006 * SCALE);
+        scene.fog = new THREE.FogExp2(0x87CEEB, 0.0006);
 
-        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 150000);
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 15000);
         camera.rotation.order = 'YXZ';
 
         // --- WebXR Rig Setup ---
+        // Rig remains unscaled to prevent view matrix inversion and clipping limits.
+        // WebXR will interpret our 1:20 scaled world as a giant table-top diorama.
         const cameraRig = new THREE.Group();
-        cameraRig.scale.setScalar(SCALE);
         cameraRig.position.set(0, targetCamY, 0);
         scene.add(cameraRig);
         cameraRig.add(camera);
 
-        const renderer = new THREE.WebGLRenderer({ 
-            antialias: true, 
-            powerPreference: "high-performance",
-            logarithmicDepthBuffer: true // Eliminates z-fighting at extreme scaled draw distances
-        });
+        const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
         renderer.setSize(window.innerWidth, window.innerHeight);
         renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
         
@@ -586,9 +581,8 @@
                         optionalFeatures: ['local-floor', 'bounded-floor']
                     });
                     
-                    // WebXR resets the projection matrix near/far planes by default (usually far=1000).
-                    // Since our rig is scaled down to 0.05, a far plane of 1000 clips everything past 50 world units.
-                    session.updateRenderState({ depthNear: 0.1, depthFar: 150000 });
+                    // Push far plane to ensure skybox renders
+                    session.updateRenderState({ depthNear: 0.1, depthFar: 15000 });
                     
                     renderer.xr.setSession(session);
                     xrSession = session;
@@ -611,7 +605,7 @@
         dirLight.shadow.camera.bottom = -d;
         dirLight.shadow.camera.near = 10;
         dirLight.shadow.camera.far = 15000;
-        dirLight.shadow.bias = -0.002; // Increased bias headroom
+        dirLight.shadow.bias = -0.002; 
         scene.add(dirLight);
 
         const envGroup = new THREE.Group();
@@ -1004,9 +998,9 @@
             skyTexture.needsUpdate = true;
             
             scene.fog.color.setStyle(botColor);
-            scene.fog.density = (isCloudy ? 0.0012 : 0.0006) * SCALE;
-            if (weatherCodeState >= 45 && weatherCodeState <= 48) scene.fog.density = 0.005 * SCALE; 
-            if (isStormActive) scene.fog.density = 0.002 * SCALE;
+            scene.fog.density = isCloudy ? 0.0012 : 0.0006;
+            if (weatherCodeState >= 45 && weatherCodeState <= 48) scene.fog.density = 0.005; 
+            if (isStormActive) scene.fog.density = 0.002;
         }
 
         // --- Coarse / High-Contrast Ground Textures ---
@@ -1144,7 +1138,7 @@
             };
 
             grassMesh = new THREE.InstancedMesh(bladeGeo, bladeMat, GRASS_COUNT);
-            grassMesh.receiveShadow = true; 
+            grassMesh.receiveShadow = false; // Disabled to prevent z-fighting without log buffer
             grassMesh.castShadow = false; 
 
             const dummy = new THREE.Object3D();
@@ -1451,12 +1445,13 @@
 
         // --- Plane Geometry ---
         const planeGeometryCache = new THREE.Group();
-        const bodyMat = new THREE.MeshLambertMaterial({ color: 0xffffff });
-        const darkMat = new THREE.MeshLambertMaterial({ color: 0x222222 });
+        const bodyMat = new THREE.MeshPhongMaterial({ color: 0xb0b0b0, specular: 0x555555, shininess: 30 });
+        const darkMat = new THREE.MeshPhongMaterial({ color: 0x222222, specular: 0x111111, shininess: 10 });
 
         const fuselageGeo = new THREE.SphereGeometry(0.7, 32, 16);
+        fuselageGeo.scale(1, 1, 7.5); 
+        fuselageGeo.computeVertexNormals();
         const fuselage = new THREE.Mesh(fuselageGeo, bodyMat);
-        fuselage.scale.set(1, 1, 7.5); 
         planeGeometryCache.add(fuselage);
 
         const lWingGeo = new THREE.BoxGeometry(4, 0.1, 2.5);
@@ -1503,6 +1498,13 @@
         const rEngine = new THREE.Mesh(engineGeo, darkMat); 
         rEngine.position.set(2.0, -0.6, 1.5); 
         planeGeometryCache.add(rEngine);
+
+        planeGeometryCache.traverse(child => {
+            if (child.isMesh) {
+                child.castShadow = true;
+                child.receiveShadow = true;
+            }
+        });
 
         const contrailGeo = new THREE.CylinderGeometry(0.1, 2.5, 150, 8, 1, true);
         contrailGeo.translate(0, -75, 0); 
@@ -1921,7 +1923,7 @@
                 const localPos = new THREE.Vector3(lx, 0, lz);
                 camera.worldToLocal(localPos);
                 
-                const pan = Math.max(-1, Math.min(1, (localPos.x * SCALE) / 2000));
+                const pan = Math.max(-1, Math.min(1, localPos.x / 2000));
                 
                 setTimeout(() => { playThunder(pan); }, (0.5 + Math.random() * 1.5) * 1000);
             }
@@ -2025,7 +2027,7 @@
                         if (distToCam < maxBirdAudioDist && Math.random() < 0.04) {
                             const localPos = new THREE.Vector3(currentX, currentY, currentZ);
                             camera.worldToLocal(localPos);
-                            const pan = Math.max(-1, Math.min(1, (localPos.x * SCALE) / maxBirdAudioDist));
+                            const pan = Math.max(-1, Math.min(1, localPos.x / maxBirdAudioDist));
                             const volScale = 1.0 - (distToCam / maxBirdAudioDist);
                             playBirdChirp(pan, volScale);
                         }
@@ -2063,7 +2065,7 @@
                     closestDist = distToCam;
                     const localPos = p.mesh.position.clone();
                     camera.worldToLocal(localPos);
-                    closestPan = Math.max(-1, Math.min(1, (localPos.x * SCALE) / 100));
+                    closestPan = Math.max(-1, Math.min(1, localPos.x / 100));
                 }
 
                 if (!renderer.xr.isPresenting) {
