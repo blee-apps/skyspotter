@@ -232,6 +232,7 @@
         let skyMesh = null;
 
         let envSpotlights = [];
+        let exclusionZones = [];
 
         // Global Materials
         const navRedMat = new THREE.MeshBasicMaterial({ color: 0xff0000, transparent: true, opacity: 0 });
@@ -343,7 +344,6 @@
                     let white = Math.random() * 2 - 1;
                     jetData[i] = (lastOut + (0.02 * white)) / 1.02;
                     lastOut = jetData[i];
-                    jetData[i] *= 3.5; 
                 }
 
                 jetPanner = audioCtx.createStereoPanner ? audioCtx.createStereoPanner() : null;
@@ -442,21 +442,21 @@
             const gust = Math.sin(t * 0.15) * 0.5 + Math.sin(t * 0.28) * 0.3 + Math.sin(t * 0.45) * 0.2;
             const normalizedGust = (gust + 1) / 2; 
             
-            let targetWindGain = 0.005;
-            if (particleType === 'rain') targetWindGain = 0.02;
-            if (isStormActive) targetWindGain = 0.05;
+            let targetWindGain = 0.003;
+            if (particleType === 'rain') targetWindGain = 0.015;
+            if (isStormActive) targetWindGain = 0.040;
             
             windFilter.frequency.setTargetAtTime(isStormActive ? 300 + (normalizedGust * 1200) : 150 + (normalizedGust * 600), audioCtx.currentTime, 0.2);
             windGain.gain.setTargetAtTime(targetWindGain + (normalizedGust * 0.01), audioCtx.currentTime, 0.2);
 
             if (jetGain) {
-                const MAX_DIST = 2500;
+                const MAX_DIST = 600; 
                 let rVol = 0, rFreq = 100;
                 
                 if (closestDist < MAX_DIST) {
                     const normDist = Math.max(0, 1 - (closestDist / MAX_DIST));
-                    rVol = Math.pow(normDist, 3) * 1.5; 
-                    rFreq = 150 + (normDist * 1500); 
+                    rVol = Math.pow(normDist, 4) * 1.0; 
+                    rFreq = 100 + (Math.pow(normDist, 2) * 700); 
                 }
                 
                 jetGain.gain.setTargetAtTime(rVol, audioCtx.currentTime, 0.1);
@@ -485,6 +485,7 @@
             });
             envGroup.clear();
             envSpotlights = [];
+            exclusionZones = [];
         }
 
         function cleanClouds() {
@@ -495,6 +496,18 @@
             });
             cloudGroup.clear();
             cloudMeshes = [];
+        }
+
+        // --- Procedural Generation Collision Rules ---
+        function isPositionClear(x, z) {
+            const pt = new THREE.Vector3(x, 0, z);
+            for (let zone of exclusionZones) {
+                const localPt = pt.clone().applyMatrix4(zone.inverseMat);
+                if (Math.abs(localPt.x) < (zone.width / 2) && Math.abs(localPt.z) < (zone.length / 2)) {
+                    return false;
+                }
+            }
+            return true;
         }
 
         // --- View State API Integration ---
@@ -633,7 +646,8 @@
                 fog: false 
             });
             distantCloudMesh = new THREE.Mesh(dcGeo, dcMat);
-            distantCloudMesh.renderOrder = -1; 
+            distantCloudMesh.renderOrder = -1;
+            distantCloudMesh.rotation.y = Math.PI / 4; 
             scene.add(distantCloudMesh);
         }
         createDistantClouds();
@@ -1144,6 +1158,13 @@
             rwMesh.userData.disposeGeometry = true; 
             rwGroup.add(rwMesh);
 
+            // Exclusion Zone for procedural clutter
+            const dummyBox = new THREE.Object3D();
+            dummyBox.position.set(x, 0, z);
+            dummyBox.rotation.y = -heading * (Math.PI/180);
+            dummyBox.updateMatrixWorld();
+            exclusionZones.push({ inverseMat: dummyBox.matrixWorld.clone().invert(), width: width + 30, length: length + 30 });
+
             // Runway Edge Lights
             const numLights = Math.floor(length / 8);
             const sGeo = new THREE.SphereGeometry(0.2, 4, 4);
@@ -1192,9 +1213,18 @@
             const dummy = new THREE.Object3D();
             const c = new THREE.Color();
             for(let i=0; i<count; i++) {
-                const r = 10 + Math.random() * radius;
-                const theta = Math.random() * Math.PI * 2;
-                dummy.position.set(cx + Math.cos(theta)*r, yOffset, cz + Math.sin(theta)*r);
+                let r, theta, bx, bz, attempts = 0;
+                do {
+                    r = 10 + Math.random() * radius;
+                    theta = Math.random() * Math.PI * 2;
+                    bx = cx + Math.cos(theta)*r;
+                    bz = cz + Math.sin(theta)*r;
+                    attempts++;
+                } while(!isPositionClear(bx, bz) && attempts < 20);
+                
+                if (attempts >= 20) continue;
+
+                dummy.position.set(bx, yOffset, bz);
                 dummy.rotation.y = Math.random() * Math.PI;
                 dummy.updateMatrix();
                 mesh.setMatrixAt(i, dummy.matrix);
@@ -1212,18 +1242,25 @@
             
             const dummy = new THREE.Object3D();
             for(let i=0; i<count; i++) {
-                const r = 10 + Math.random() * radius;
-                const theta = Math.random() * Math.PI * 2;
-                const x = cx + Math.cos(theta)*r;
-                const z = cz + Math.sin(theta)*r;
-                dummy.position.set(x, 0.2, z);
+                let r, theta, tx, tz, attempts = 0;
+                do {
+                    r = 10 + Math.random() * radius;
+                    theta = Math.random() * Math.PI * 2;
+                    tx = cx + Math.cos(theta)*r;
+                    tz = cz + Math.sin(theta)*r;
+                    attempts++;
+                } while(!isPositionClear(tx, tz) && attempts < 20);
+                
+                if (attempts >= 20) continue;
+
+                dummy.position.set(tx, 0.2, tz);
                 if (type === 'palm') { dummy.scale.set(0.5, 2.0, 0.5); dummy.rotation.z = (Math.random()-0.5)*0.2; }
                 else { dummy.scale.setScalar(1); dummy.rotation.set(0,0,0); }
                 dummy.updateMatrix();
                 tMesh.setMatrixAt(i, dummy.matrix);
                 
                 if (type !== 'bare') {
-                    dummy.position.set(x, type === 'palm' ? 0.6 : 0.4, z);
+                    dummy.position.set(tx, type === 'palm' ? 0.6 : 0.4, tz);
                     dummy.scale.setScalar(type === 'palm' ? 1.0 : 1.0 + Math.random());
                     dummy.updateMatrix();
                     lMesh.setMatrixAt(i, dummy.matrix);
@@ -1240,6 +1277,13 @@
             mesh.rotation.y = -heading * (Math.PI/180);
             mesh.receiveShadow = true; mesh.castShadow = true;
             mesh.userData.disposeGeometry = true;
+            
+            const dummyBox = new THREE.Object3D();
+            dummyBox.position.set(x, 0, z);
+            dummyBox.rotation.y = -heading * (Math.PI/180);
+            dummyBox.updateMatrixWorld();
+            exclusionZones.push({ inverseMat: dummyBox.matrixWorld.clone().invert(), width: sx + 15, length: sz + 15 });
+
             envGroup.add(mesh);
         }
 
@@ -1562,7 +1606,7 @@
                 const pathMat = PATH_MATERIALS[hash % PATH_MATERIALS.length];
                 const pathLine = new THREE.Mesh(pathPlaneGeo, pathMat);
                 pathLine.rotation.x = -Math.PI / 2; 
-                pathLine.position.y = -10; 
+                pathLine.position.y = -0.5; 
                 pathLine.visible = showPaths;
                 mesh.add(pathLine);
 
