@@ -187,14 +187,6 @@
             <div class="heading-text" id="heading-display">360°</div>
 
             <div class="stance-controls">
-                <button class="stance-btn" id="stance-vr" title="Enter VR" style="display: none;">
-                    <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M4 14v-3a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v3"></path>
-                        <path d="M4 14a2 2 0 0 0 2 2h1.5l2.5 4h4l2.5-4h1.5a2 2 0 0 0 2-2"></path>
-                        <circle cx="8.5" cy="11.5" r="0.5" fill="currentColor"></circle>
-                        <circle cx="15.5" cy="11.5" r="0.5" fill="currentColor"></circle>
-                    </svg>
-                </button>
                 <button class="stance-btn" id="stance-float" title="Floating (100m)">
                     <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M2 14c3.5-4 6.5-4 10 0 3.5-4 6.5-4 10 0" />
@@ -234,7 +226,6 @@
 
         let targetCamY = 0.05; 
         
-        const skyGroup = new THREE.Group();
         let starLayer1 = null;
         let starLayer2 = null;
         let distantCloudMesh = null;
@@ -496,34 +487,25 @@
         document.addEventListener('visibilitychange', () => {
             if (document.hidden) {
                 if (audioCtx && audioCtx.state === 'running') audioCtx.suspend();
-                renderer.setAnimationLoop(null);
+                if (animationFrameId) { cancelAnimationFrame(animationFrameId); animationFrameId = null; }
                 if (fetchIntervalId) { clearInterval(fetchIntervalId); fetchIntervalId = null; }
             } else {
                 if (document.getElementById('start-screen').style.opacity === '0') {
                     if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
                     lastTimestamp = performance.now();
-                    renderer.setAnimationLoop(animate);
+                    if (!animationFrameId) animate();
                     if (!usingMockData && !fetchIntervalId) fetchIntervalId = setInterval(fetchFlights, 10000);
                 }
             }
         });
 
-        // --- Three.js Setup ---
         const container = document.getElementById('canvas-container');
         const scene = new THREE.Scene();
         scene.fog = new THREE.FogExp2(0x87CEEB, 0.0006);
 
-        // Near plane fixed to 0.002 to stop ground clipping when lying down
         const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.002, 150000);
+        camera.position.set(0, targetCamY, 0); 
         camera.rotation.order = 'YXZ';
-
-        // --- WebXR Rig Setup ---
-        const cameraRig = new THREE.Group();
-        cameraRig.position.set(0, targetCamY, 0);
-        scene.add(cameraRig);
-        cameraRig.add(camera);
-        
-        scene.add(skyGroup);
 
         const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
         renderer.setSize(window.innerWidth, window.innerHeight);
@@ -533,38 +515,7 @@
         
         renderer.shadowMap.enabled = true;
         renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-        renderer.xr.enabled = true;
-        renderer.xr.setReferenceSpaceType('local-floor');
         container.appendChild(renderer.domElement);
-
-        if ('xr' in navigator) {
-            navigator.xr.isSessionSupported('immersive-vr').then((supported) => {
-                if (supported) {
-                    document.getElementById('stance-vr').style.display = 'flex';
-                }
-            });
-        }
-
-        let xrSession = null;
-        document.getElementById('stance-vr').addEventListener('click', async () => {
-            if (xrSession) {
-                xrSession.end();
-            } else {
-                try {
-                    const session = await navigator.xr.requestSession('immersive-vr', {
-                        optionalFeatures: ['local-floor', 'bounded-floor']
-                    });
-                    
-                    session.updateRenderState({ depthNear: 0.01, depthFar: 100000 });
-                    
-                    renderer.xr.setSession(session);
-                    xrSession = session;
-                    session.addEventListener('end', () => { xrSession = null; });
-                } catch (e) {
-                    console.warn("VR Init failed", e);
-                }
-            }
-        });
 
         const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 0.6);
         scene.add(hemiLight);
@@ -584,16 +535,15 @@
         const envGroup = new THREE.Group();
         scene.add(envGroup);
 
-        // --- Tethered Infinite Skybox ---
         const skyCanvas = document.createElement('canvas');
         skyCanvas.width = 2; skyCanvas.height = 512;
         const skyContext = skyCanvas.getContext('2d');
         const skyTexture = new THREE.CanvasTexture(skyCanvas);
-        const skyGeo = new THREE.SphereGeometry(200, 32, 15);
+        const skyGeo = new THREE.SphereGeometry(5000, 32, 15);
         const skyMat = new THREE.MeshBasicMaterial({ map: skyTexture, side: THREE.BackSide, fog: false, depthWrite: false, depthTest: false });
         skyMesh = new THREE.Mesh(skyGeo, skyMat);
         skyMesh.renderOrder = -3;
-        skyGroup.add(skyMesh);
+        scene.add(skyMesh);
 
         function createDistantClouds() {
             const cloudShader = {
@@ -644,7 +594,6 @@
                         vec2 st = vec2(angle * 4.0 + uTime * 0.01, height * 6.0);
                         float n = fbm(st);
                         
-                        // Enforces hard termination at the horizon (0.0)
                         float verticalMask = smoothstep(0.4, 0.05, height) * step(0.0, height);
                         float cloudAlpha = smoothstep(0.3, 0.7, n) * verticalMask;
                         
@@ -653,7 +602,7 @@
                 `
             };
 
-            const dcGeo = new THREE.SphereGeometry(190, 32, 16);
+            const dcGeo = new THREE.SphereGeometry(4900, 32, 16);
             const dcMat = new THREE.ShaderMaterial({
                 uniforms: cloudShader.uniforms,
                 vertexShader: cloudShader.vertexShader,
@@ -661,27 +610,25 @@
                 transparent: true,
                 side: THREE.BackSide,
                 depthWrite: false,
-                depthTest: false, 
+                depthTest: true, 
                 fog: false 
             });
             distantCloudMesh = new THREE.Mesh(dcGeo, dcMat);
             distantCloudMesh.renderOrder = -1;
-            distantCloudMesh.rotation.y = Math.PI / 4; 
-            skyGroup.add(distantCloudMesh);
+            scene.add(distantCloudMesh);
         }
         createDistantClouds();
 
         function createStars() {
-            const createLayer = (count, size, radiusMin, radiusMax, colorHex) => {
+            const createLayer = (count, size, radius, colorHex) => {
                 const geo = new THREE.BufferGeometry();
                 const pos = new Float32Array(count * 3);
                 for(let i=0; i<count*3; i+=3) {
                     const u = Math.random();
-                    // Maps stars perfectly to the upper hemisphere, avoiding the horizon line completely
-                    const v = 0.1 + Math.random() * 0.9;
+                    const v = Math.random(); 
                     const theta = u * 2.0 * Math.PI;
                     const phi = Math.acos(v); 
-                    const r = radiusMin + Math.random() * (radiusMax - radiusMin);
+                    const r = radius + Math.random() * 200;
                     
                     pos[i] = r * Math.sin(phi) * Math.cos(theta);
                     pos[i+1] = r * Math.cos(phi); 
@@ -696,7 +643,7 @@
                     blending: THREE.AdditiveBlending,
                     sizeAttenuation: false,
                     depthWrite: false, 
-                    depthTest: false, 
+                    depthTest: true, 
                     fog: false 
                 });
                 const mesh = new THREE.Points(geo, mat);
@@ -704,11 +651,11 @@
                 return mesh;
             };
 
-            starLayer1 = createLayer(2000, 1.5, 180, 185, 0xffffff); 
-            starLayer2 = createLayer(800, 2.5, 170, 175, 0xeeeeff); 
+            starLayer1 = createLayer(4000, 1.5, 4800, 0xffffff); 
+            starLayer2 = createLayer(1500, 2.5, 4500, 0xeeeeff); 
             
-            skyGroup.add(starLayer1);
-            skyGroup.add(starLayer2);
+            scene.add(starLayer1);
+            scene.add(starLayer2);
         }
         createStars();
 
@@ -844,7 +791,7 @@
             return `rgb(${r},${g},${b})`;
         }
 
-        function updateSkyAndLighting(localHour, isVR) {
+        function updateSkyAndLighting(localHour) {
             if (!currentAirport) return;
             
             const sunrise = currentAirport.sunrise || 6.0;
@@ -968,11 +915,9 @@
             skyTexture.needsUpdate = true;
             
             scene.fog.color.setStyle(botColor);
-            
-            let baseFogDensity = isCloudy ? 0.0012 : 0.0006;
-            if (weatherCodeState >= 45 && weatherCodeState <= 48) baseFogDensity = 0.005; 
-            if (isStormActive) baseFogDensity = 0.002;
-            scene.fog.density = isVR ? baseFogDensity * SCALE : baseFogDensity;
+            scene.fog.density = isCloudy ? 0.0012 : 0.0006;
+            if (weatherCodeState >= 45 && weatherCodeState <= 48) scene.fog.density = 0.005; 
+            if (isStormActive) scene.fog.density = 0.002;
         }
 
         // --- Coarse / High-Contrast Ground Textures ---
@@ -1111,7 +1056,7 @@
 
             grassMesh = new THREE.InstancedMesh(bladeGeo, bladeMat, GRASS_COUNT);
             grassMesh.receiveShadow = false; 
-            grassMesh.castShadow = false;
+            grassMesh.castShadow = false; 
 
             const dummy = new THREE.Object3D();
             for (let i = 0; i < GRASS_COUNT; i++) {
@@ -1603,7 +1548,6 @@
             if (activePlanes.has(icao)) {
                 const p = activePlanes.get(icao);
                 p.targetPos.set(x, y, z);
-                p.worldPos.set(x, y, z); 
                 p.velocity = velocity;
                 p.heading = heading;
                 p.lastUpdate = performance.now();
@@ -1664,11 +1608,10 @@
 
                 document.getElementById('labels-container').appendChild(el);
                 
+                // Track state for DOM optimizations
                 activePlanes.set(icao, { 
                     mesh, el, pathLine, 
                     targetPos: new THREE.Vector3(x, y, z), 
-                    worldPos: new THREE.Vector3(x, y, z),
-                    baseScale: scaleMod,
                     velocity, heading, alt,
                     lastScreenX: null, lastScreenY: null, lastOpacity: null
                 });
@@ -1780,10 +1723,8 @@
         let camPitch = Math.PI / 6; 
 
         function updateCameraRotation() {
-            if (!renderer.xr.isPresenting) {
-                camera.rotation.y = camYaw; 
-                camera.rotation.x = camPitch;
-            }
+            camera.rotation.y = camYaw; 
+            camera.rotation.x = camPitch;
         }
         updateCameraRotation();
 
@@ -1795,7 +1736,7 @@
         }
         
         function handlePointerMove(e) {
-            if (!isDragging || renderer.xr.isPresenting) return;
+            if (!isDragging) return;
             const current = { x: e.touches ? e.touches[0].pageX : e.clientX, y: e.touches ? e.touches[0].pageY : e.clientY };
             camYaw += (current.x - prevMouse.x) * 0.003;
             camPitch += (current.y - prevMouse.y) * 0.003;
@@ -1850,15 +1791,13 @@
 
         // --- Main Loop ---
         function animate() {
+            animationFrameId = requestAnimationFrame(animate);
             const now = performance.now();
             const dt = (now - lastTimestamp) / 1000;
             const timeSeconds = now * 0.001;
             lastTimestamp = now;
 
-            cameraRig.position.y += (targetCamY - cameraRig.position.y) * 5 * dt;
-
-            const isVR = renderer.xr.isPresenting;
-            cameraRig.scale.setScalar(isVR ? SCALE : 1.0);
+            camera.position.y += (targetCamY - camera.position.y) * 5 * dt;
 
             let localHour = 12; 
             if (currentAirport) {
@@ -1887,22 +1826,17 @@
                 } catch(e) {}
             }
             
-            const camWorldPos = new THREE.Vector3();
-            camera.getWorldPosition(camWorldPos);
-
-            skyGroup.position.copy(camWorldPos);
-
             // Lightning Logic
             if (isStormActive && Math.random() < 0.005 && lightningFrames <= 0) {
-                const lx = camWorldPos.x + (Math.random() - 0.5) * 4000;
-                const lz = camWorldPos.z + (Math.random() - 0.5) * 4000;
+                const lx = camera.position.x + (Math.random() - 0.5) * 4000;
+                const lz = camera.position.z + (Math.random() - 0.5) * 4000;
                 createLightning(lx, lz);
                 lightningFrames = 4;
                 
                 const localPos = new THREE.Vector3(lx, 0, lz);
                 camera.worldToLocal(localPos);
                 
-                const pan = Math.max(-1, Math.min(1, (localPos.x * (isVR ? SCALE : 1.0)) / 2000));
+                const pan = Math.max(-1, Math.min(1, localPos.x / 2000));
                 
                 setTimeout(() => { playThunder(pan); }, (0.5 + Math.random() * 1.5) * 1000);
             }
@@ -1920,9 +1854,10 @@
                 lightningFlash = Math.max(0, lightningFlash - 0.1);
             }
 
-            updateSkyAndLighting(localHour, isVR);
+            updateSkyAndLighting(localHour);
 
             if (starLayer1 && starLayer2) {
+                // Fixed orbital rotation without X/Z tilt that causes bleeding
                 starLayer1.rotation.y += 0.0035 * dt;
                 starLayer2.rotation.y += 0.007 * dt;
             }
@@ -1996,7 +1931,7 @@
                         birdMesh.instanceMatrix.needsUpdate = true;
                         birdUniforms.uTime.value = timeSeconds;
 
-                        const distToCam = Math.sqrt(Math.pow(currentX - camWorldPos.x, 2) + Math.pow(currentZ - camWorldPos.z, 2));
+                        const distToCam = Math.sqrt(Math.pow(currentX - camera.position.x, 2) + Math.pow(currentZ - camera.position.z, 2));
                         const opacity = Math.max(0, Math.min(1, (250 - distToCam) / 50));
                         birdMesh.material.opacity = opacity;
 
@@ -2004,7 +1939,7 @@
                         if (distToCam < maxBirdAudioDist && Math.random() < 0.04) {
                             const localPos = new THREE.Vector3(currentX, currentY, currentZ);
                             camera.worldToLocal(localPos);
-                            const pan = Math.max(-1, Math.min(1, (localPos.x * (isVR ? SCALE : 1.0)) / maxBirdAudioDist));
+                            const pan = Math.max(-1, Math.min(1, localPos.x / maxBirdAudioDist));
                             const volScale = 1.0 - (distToCam / maxBirdAudioDist);
                             playBirdChirp(pan, volScale);
                         }
@@ -2029,73 +1964,57 @@
                 const speedScale = p.velocity * SCALE;
                 const rad = p.heading * (Math.PI / 180);
                 
-                p.worldPos.x += Math.sin(rad) * speedScale * dt;
-                p.worldPos.z += -Math.cos(rad) * speedScale * dt;
+                p.mesh.position.x += Math.sin(rad) * speedScale * dt;
+                p.mesh.position.z += -Math.cos(rad) * speedScale * dt;
                 p.mesh.rotation.y = -rad;
 
                 if (usingMockData) { 
-                    if (p.worldPos.length() > 3000) p.worldPos.copy(p.targetPos);
+                    if (p.mesh.position.length() > 3000) p.mesh.position.copy(p.targetPos);
                 }
 
-                const distToCam = p.worldPos.distanceTo(camWorldPos);
+                const distToCam = p.mesh.position.distanceTo(camera.position);
                 if (distToCam < closestDist) {
                     closestDist = distToCam;
-                    const localPos = p.worldPos.clone();
+                    const localPos = p.mesh.position.clone();
                     camera.worldToLocal(localPos);
-                    closestPan = Math.max(-1, Math.min(1, (localPos.x * (isVR ? SCALE : 1.0)) / 100));
+                    closestPan = Math.max(-1, Math.min(1, localPos.x / 100));
                 }
 
-                if (isVR && distToCam > 150) {
-                    const dir = p.worldPos.clone().sub(camWorldPos).normalize();
-                    p.mesh.position.copy(camWorldPos).add(dir.multiplyScalar(150));
-                    const ratio = 150 / distToCam;
-                    p.mesh.scale.setScalar(p.baseScale * ratio);
-                } else {
-                    p.mesh.position.copy(p.worldPos);
-                    p.mesh.scale.setScalar(p.baseScale);
-                }
+                const proj = p.mesh.position.clone();
+                proj.project(camera);
 
-                if (!isVR) {
-                    const proj = p.mesh.position.clone();
-                    proj.project(camera);
-
-                    if (proj.z > 1) {
-                        p.el.classList.remove('visible');
-                    } else {
-                        p.el.classList.add('visible');
-                        
-                        const x = Math.round((proj.x * 0.5 + 0.5) * window.innerWidth);
-                        const y = Math.round((-(proj.y * 0.5) + 0.5) * window.innerHeight);
-
-                        if (p.lastScreenX !== x || p.lastScreenY !== y) {
-                            p.el.style.transform = `translate3d(${x}px, ${y}px, 0) translate(-50%, 45px)`;
-                            p.lastScreenX = x;
-                            p.lastScreenY = y;
-                        }
-                        
-                        let targetOpacity = '1';
-                        if (selectedIcao !== icao) {
-                            targetOpacity = distToCam > 1500 ? '0.2' : (distToCam > 800 ? '0.6' : '1');
-                        }
-                        if (p.lastOpacity !== targetOpacity) {
-                            p.el.style.opacity = targetOpacity;
-                            p.lastOpacity = targetOpacity;
-                        }
-                    }
-                } else {
+                if (proj.z > 1) {
                     p.el.classList.remove('visible');
+                } else {
+                    p.el.classList.add('visible');
+                    
+                    const x = Math.round((proj.x * 0.5 + 0.5) * window.innerWidth);
+                    const y = Math.round((-(proj.y * 0.5) + 0.5) * window.innerHeight);
+
+                    if (p.lastScreenX !== x || p.lastScreenY !== y) {
+                        p.el.style.transform = `translate3d(${x}px, ${y}px, 0) translate(-50%, 45px)`;
+                        p.lastScreenX = x;
+                        p.lastScreenY = y;
+                    }
+                    
+                    let targetOpacity = '1';
+                    if (selectedIcao !== icao) {
+                        targetOpacity = distToCam > 1500 ? '0.2' : (distToCam > 800 ? '0.6' : '1');
+                    }
+                    if (p.lastOpacity !== targetOpacity) {
+                        p.el.style.opacity = targetOpacity;
+                        p.lastOpacity = targetOpacity;
+                    }
                 }
             });
 
             updateAudio(timeSeconds, closestDist, closestPan);
 
-            if (!isVR) {
-                let degrees = (camYaw * 180 / Math.PI) % 360;
-                if (degrees < 0) degrees += 360;
-                document.getElementById('compass-dial').style.transform = `rotate(${degrees}deg)`;
-                const headingNum = Math.round(360 - degrees) % 360;
-                document.getElementById('heading-display').textContent = `${headingNum === 0 ? 360 : headingNum}°`;
-            }
+            let degrees = (camYaw * 180 / Math.PI) % 360;
+            if (degrees < 0) degrees += 360;
+            document.getElementById('compass-dial').style.transform = `rotate(${degrees}deg)`;
+            const headingNum = Math.round(360 - degrees) % 360;
+            document.getElementById('heading-display').textContent = `${headingNum === 0 ? 360 : headingNum}°`;
 
             renderer.render(scene, camera);
         }
@@ -2145,13 +2064,13 @@
                 document.getElementById('ui-layer').style.opacity = '1';
                 
                 lastTimestamp = performance.now();
-                renderer.setAnimationLoop(animate);
+                if (!animationFrameId) animate();
                 if (!usingMockData && !fetchIntervalId) fetchIntervalId = setInterval(fetchFlights, 10000); 
             }, 800);
         });
 
         document.getElementById('back-btn').addEventListener('click', () => {
-            renderer.setAnimationLoop(null);
+            if (animationFrameId) { cancelAnimationFrame(animationFrameId); animationFrameId = null; }
             if (fetchIntervalId) { clearInterval(fetchIntervalId); fetchIntervalId = null; }
             suspendAudio();
             clearAirspace();
