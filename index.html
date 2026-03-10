@@ -1606,7 +1606,7 @@
                 const pathMat = PATH_MATERIALS[hash % PATH_MATERIALS.length];
                 const pathLine = new THREE.Mesh(pathPlaneGeo, pathMat);
                 pathLine.rotation.x = -Math.PI / 2; 
-                pathLine.position.y = -0.5; 
+                pathLine.position.y = -1.5; 
                 pathLine.visible = showPaths;
                 mesh.add(pathLine);
 
