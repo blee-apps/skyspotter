@@ -234,6 +234,7 @@
 
         let targetCamY = 0.05; 
         
+        const skyGroup = new THREE.Group();
         let starLayer1 = null;
         let starLayer2 = null;
         let distantCloudMesh = null;
@@ -248,7 +249,6 @@
         const strobeMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0 });
         const runwayLightMat = new THREE.MeshBasicMaterial({ color: 0xffeeaa, transparent: true, opacity: 0 });
 
-        // Pre-allocate path line materials to prevent memory leak
         const PATH_COLORS = [0xFF2A55, 0x2AFF55, 0x2A88FF, 0xFFD700, 0x00E5FF, 0xAA00FF];
         const PATH_MATERIALS = PATH_COLORS.map(cHex => new THREE.MeshBasicMaterial({ 
             color: cHex, transparent: true, opacity: 0.6, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending 
@@ -280,7 +280,6 @@
             "CES": "China Eastern Airlines", "RYR": "Ryanair", "EZY": "easyJet", "ETD": "Etihad Airways"
         };
 
-        // --- Network Helper ---
         async function fetchWithTimeout(url, options = {}, timeoutMs = 4000) {
             const controller = new AbortController();
             const id = setTimeout(() => controller.abort(), timeoutMs);
@@ -295,28 +294,6 @@
             }
         }
 
-        // --- Astronomical Sun Calculation ---
-        function getSunPosition(date, lat, lon) {
-            const PI = Math.PI, sin = Math.sin, cos = Math.cos, asin = Math.asin, atan2 = Math.atan2, tan = Math.tan;
-            const rad = PI / 180;
-            const dayMs = 1000 * 60 * 60 * 24;
-            const J1970 = 2440588, J2000 = 2451545;
-            const lw = rad * -lon, phi = rad * lat;
-            const d = date.valueOf() / dayMs - 0.5 + J1970 - J2000;
-            const M = rad * (357.5291 + 0.98560028 * d);
-            const C = rad * (1.9148 * sin(M) + 0.02 * sin(2 * M) + 0.0003 * sin(3 * M));
-            const P = M + C;
-            const L = P + rad * 102.9372;
-            const dec = asin(sin(L) * sin(rad * 23.4397));
-            const ra = atan2(sin(L) * cos(rad * 23.4397), cos(L));
-            const H = rad * (280.16 + 360.9856235 * d) - lw - ra;
-            
-            const alt = asin(sin(phi) * sin(dec) + cos(phi) * cos(dec) * cos(H));
-            const az = atan2(sin(H), cos(H) * sin(phi) - tan(dec) * cos(phi));
-            return { altitude: alt, azimuth: az + PI }; 
-        }
-
-        // --- Audio Context & Synthesis ---
         let audioCtx, windGain, windFilter, globalNoiseBuffer;
         let jetGain, jetFilter, jetPanner;
         let birdPanner;
@@ -482,7 +459,6 @@
             consoleEl.scrollTop = consoleEl.scrollHeight;
         }
 
-        // --- Memory Management Helpers ---
         function cleanEnvironment() {
             envGroup.children.forEach(obj => {
                 obj.traverse(child => {
@@ -506,7 +482,6 @@
             cloudMeshes = [];
         }
 
-        // --- Procedural Generation Collision Rules ---
         function isPositionClear(x, z) {
             const pt = new THREE.Vector3(x, 0, z);
             for (let zone of exclusionZones) {
@@ -518,7 +493,6 @@
             return true;
         }
 
-        // --- View State API Integration ---
         document.addEventListener('visibilitychange', () => {
             if (document.hidden) {
                 if (audioCtx && audioCtx.state === 'running') audioCtx.suspend();
@@ -534,21 +508,20 @@
             }
         });
 
-        // --- Three.js Setup ---
         const container = document.getElementById('canvas-container');
         const scene = new THREE.Scene();
         scene.fog = new THREE.FogExp2(0x87CEEB, 0.0006);
 
-        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 15000);
+        // Near plane fixed to 0.002 to stop ground clipping when lying down
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.002, 6000);
         camera.rotation.order = 'YXZ';
 
-        // --- WebXR Rig Setup ---
-        // Rig remains unscaled to prevent view matrix inversion and clipping limits.
-        // WebXR will interpret our 1:20 scaled world as a giant table-top diorama.
         const cameraRig = new THREE.Group();
         cameraRig.position.set(0, targetCamY, 0);
         scene.add(cameraRig);
         cameraRig.add(camera);
+        
+        scene.add(skyGroup);
 
         const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
         renderer.setSize(window.innerWidth, window.innerHeight);
@@ -562,7 +535,6 @@
         renderer.xr.setReferenceSpaceType('local-floor');
         container.appendChild(renderer.domElement);
 
-        // --- XR Device Check ---
         if ('xr' in navigator) {
             navigator.xr.isSessionSupported('immersive-vr').then((supported) => {
                 if (supported) {
@@ -581,8 +553,8 @@
                         optionalFeatures: ['local-floor', 'bounded-floor']
                     });
                     
-                    // Push far plane to ensure skybox renders
-                    session.updateRenderState({ depthNear: 0.1, depthFar: 15000 });
+                    // Hardware limits bounded by our 6000 unit virtual far plane
+                    session.updateRenderState({ depthNear: 0.002, depthFar: 6000 });
                     
                     renderer.xr.setSession(session);
                     xrSession = session;
@@ -611,7 +583,6 @@
         const envGroup = new THREE.Group();
         scene.add(envGroup);
 
-        // --- Environment ---
         const skyCanvas = document.createElement('canvas');
         skyCanvas.width = 2; skyCanvas.height = 512;
         const skyContext = skyCanvas.getContext('2d');
@@ -620,9 +591,8 @@
         const skyMat = new THREE.MeshBasicMaterial({ map: skyTexture, side: THREE.BackSide, fog: false, depthWrite: false, depthTest: false });
         skyMesh = new THREE.Mesh(skyGeo, skyMat);
         skyMesh.renderOrder = -3;
-        scene.add(skyMesh);
+        skyGroup.add(skyMesh);
 
-        // --- Distant Clouds (Procedural Shader Layer) ---
         function createDistantClouds() {
             const cloudShader = {
                 uniforms: {
@@ -672,7 +642,8 @@
                         vec2 st = vec2(angle * 4.0 + uTime * 0.01, height * 6.0);
                         float n = fbm(st);
                         
-                        float verticalMask = smoothstep(0.4, 0.05, height) * smoothstep(-0.05, 0.05, height);
+                        // Enforces hard termination at the horizon (0.0)
+                        float verticalMask = smoothstep(0.4, 0.05, height) * smoothstep(0.0, 0.05, height);
                         float cloudAlpha = smoothstep(0.3, 0.7, n) * verticalMask;
                         
                         gl_FragColor = vec4(uColor, cloudAlpha * uOpacity);
@@ -694,21 +665,20 @@
             distantCloudMesh = new THREE.Mesh(dcGeo, dcMat);
             distantCloudMesh.renderOrder = -1;
             distantCloudMesh.rotation.y = Math.PI / 4; 
-            scene.add(distantCloudMesh);
+            skyGroup.add(distantCloudMesh);
         }
         createDistantClouds();
 
-        // --- Stars ---
         function createStars() {
-            const createLayer = (count, size, radius, colorHex) => {
+            const createLayer = (count, size, radiusMin, radiusMax, colorHex) => {
                 const geo = new THREE.BufferGeometry();
                 const pos = new Float32Array(count * 3);
                 for(let i=0; i<count*3; i+=3) {
                     const u = Math.random();
                     const v = Math.random();
                     const theta = u * 2.0 * Math.PI;
-                    const phi = Math.acos(v); 
-                    const r = radius + Math.random() * 200;
+                    const phi = Math.acos(v); // Geometrically binds stars to positive Y (upper hemisphere)
+                    const r = radiusMin + Math.random() * (radiusMax - radiusMin);
                     
                     pos[i] = r * Math.sin(phi) * Math.cos(theta);
                     pos[i+1] = r * Math.cos(phi); 
@@ -731,14 +701,11 @@
                 return mesh;
             };
 
-            starLayer1 = createLayer(4000, 1.5, 4800, 0xffffff); 
-            starLayer2 = createLayer(1500, 2.5, 4500, 0xeeeeff); 
+            starLayer1 = createLayer(4000, 1.5, 4800, 5000, 0xffffff); 
+            starLayer2 = createLayer(1500, 2.5, 4500, 4700, 0xeeeeff); 
             
-            starLayer1.rotation.x = Math.PI / 8;
-            starLayer2.rotation.x = -Math.PI / 12;
-
-            scene.add(starLayer1);
-            scene.add(starLayer2);
+            skyGroup.add(starLayer1);
+            skyGroup.add(starLayer2);
         }
         createStars();
 
@@ -874,7 +841,7 @@
             return `rgb(${r},${g},${b})`;
         }
 
-        function updateSkyAndLighting(localHour) {
+        function updateSkyAndLighting(localHour, isVR) {
             if (!currentAirport) return;
             
             const sunrise = currentAirport.sunrise || 6.0;
@@ -998,9 +965,12 @@
             skyTexture.needsUpdate = true;
             
             scene.fog.color.setStyle(botColor);
-            scene.fog.density = isCloudy ? 0.0012 : 0.0006;
-            if (weatherCodeState >= 45 && weatherCodeState <= 48) scene.fog.density = 0.005; 
-            if (isStormActive) scene.fog.density = 0.002;
+            
+            // Fog offset calculation. WebXR matrix inversion makes objects appear SCALEx further away.
+            let baseFogDensity = isCloudy ? 0.0012 : 0.0006;
+            if (weatherCodeState >= 45 && weatherCodeState <= 48) baseFogDensity = 0.005; 
+            if (isStormActive) baseFogDensity = 0.002;
+            scene.fog.density = isVR ? baseFogDensity * SCALE : baseFogDensity;
         }
 
         // --- Coarse / High-Contrast Ground Textures ---
@@ -1138,8 +1108,8 @@
             };
 
             grassMesh = new THREE.InstancedMesh(bladeGeo, bladeMat, GRASS_COUNT);
-            grassMesh.receiveShadow = false; // Disabled to prevent z-fighting without log buffer
-            grassMesh.castShadow = false; 
+            grassMesh.receiveShadow = false; 
+            grassMesh.castShadow = false;
 
             const dummy = new THREE.Object3D();
             for (let i = 0; i < GRASS_COUNT; i++) {
@@ -1431,7 +1401,7 @@
 
                 if (particleType === 'snow') {
                     px += (vel.x + Math.sin(t + py)) * 2 * dt;
-                    pz += (vel.z + Math.cos(timeSeconds + py)) * 2 * dt;
+                    pz += (vel.z + Math.cos(t + py)) * 2 * dt;
                 } else { px += vel.x * dt; }
                 py += vel.y * dt;
 
@@ -1883,6 +1853,10 @@
 
             cameraRig.position.y += (targetCamY - cameraRig.position.y) * 5 * dt;
 
+            const isVR = renderer.xr.isPresenting;
+            cameraRig.scale.setScalar(isVR ? SCALE : 1.0);
+            skyGroup.scale.setScalar(isVR ? SCALE : 1.0);
+
             let localHour = 12; 
             if (currentAirport) {
                 try {
@@ -1913,6 +1887,9 @@
             const camWorldPos = new THREE.Vector3();
             camera.getWorldPosition(camWorldPos);
 
+            // Tether skybox firmly to camera
+            skyGroup.position.copy(camWorldPos);
+
             // Lightning Logic
             if (isStormActive && Math.random() < 0.005 && lightningFrames <= 0) {
                 const lx = camWorldPos.x + (Math.random() - 0.5) * 4000;
@@ -1923,7 +1900,7 @@
                 const localPos = new THREE.Vector3(lx, 0, lz);
                 camera.worldToLocal(localPos);
                 
-                const pan = Math.max(-1, Math.min(1, localPos.x / 2000));
+                const pan = Math.max(-1, Math.min(1, (localPos.x * (isVR ? SCALE : 1.0)) / 2000));
                 
                 setTimeout(() => { playThunder(pan); }, (0.5 + Math.random() * 1.5) * 1000);
             }
@@ -1941,13 +1918,11 @@
                 lightningFlash = Math.max(0, lightningFlash - 0.1);
             }
 
-            updateSkyAndLighting(localHour);
+            updateSkyAndLighting(localHour, isVR);
 
             if (starLayer1 && starLayer2) {
                 starLayer1.rotation.y += 0.0035 * dt;
-                starLayer1.rotation.z += 0.00175 * dt;
                 starLayer2.rotation.y += 0.007 * dt;
-                starLayer2.rotation.z += 0.0035 * dt;
             }
 
             if (distantCloudMesh && distantCloudMesh.material.uniforms.uOpacity.value > 0) {
@@ -2027,7 +2002,7 @@
                         if (distToCam < maxBirdAudioDist && Math.random() < 0.04) {
                             const localPos = new THREE.Vector3(currentX, currentY, currentZ);
                             camera.worldToLocal(localPos);
-                            const pan = Math.max(-1, Math.min(1, localPos.x / maxBirdAudioDist));
+                            const pan = Math.max(-1, Math.min(1, (localPos.x * (isVR ? SCALE : 1.0)) / maxBirdAudioDist));
                             const volScale = 1.0 - (distToCam / maxBirdAudioDist);
                             playBirdChirp(pan, volScale);
                         }
@@ -2065,10 +2040,10 @@
                     closestDist = distToCam;
                     const localPos = p.mesh.position.clone();
                     camera.worldToLocal(localPos);
-                    closestPan = Math.max(-1, Math.min(1, localPos.x / 100));
+                    closestPan = Math.max(-1, Math.min(1, (localPos.x * (isVR ? SCALE : 1.0)) / 100));
                 }
 
-                if (!renderer.xr.isPresenting) {
+                if (!isVR) {
                     const proj = p.mesh.position.clone();
                     proj.project(camera);
 
@@ -2102,7 +2077,7 @@
 
             updateAudio(timeSeconds, closestDist, closestPan);
 
-            if (!renderer.xr.isPresenting) {
+            if (!isVR) {
                 let degrees = (camYaw * 180 / Math.PI) % 360;
                 if (degrees < 0) degrees += 360;
                 document.getElementById('compass-dial').style.transform = `rotate(${degrees}deg)`;
