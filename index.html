@@ -187,6 +187,14 @@
             <div class="heading-text" id="heading-display">360°</div>
 
             <div class="stance-controls">
+                <button class="stance-btn" id="stance-vr" title="Enter VR" style="display: none;">
+                    <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M4 14v-3a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v3"></path>
+                        <path d="M4 14a2 2 0 0 0 2 2h1.5l2.5 4h4l2.5-4h1.5a2 2 0 0 0 2-2"></path>
+                        <circle cx="8.5" cy="11.5" r="0.5" fill="currentColor"></circle>
+                        <circle cx="15.5" cy="11.5" r="0.5" fill="currentColor"></circle>
+                    </svg>
+                </button>
                 <button class="stance-btn" id="stance-float" title="Floating (100m)">
                     <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M2 14c3.5-4 6.5-4 10 0 3.5-4 6.5-4 10 0" />
@@ -514,13 +522,13 @@
         document.addEventListener('visibilitychange', () => {
             if (document.hidden) {
                 if (audioCtx && audioCtx.state === 'running') audioCtx.suspend();
-                if (animationFrameId) { cancelAnimationFrame(animationFrameId); animationFrameId = null; }
+                renderer.setAnimationLoop(null);
                 if (fetchIntervalId) { clearInterval(fetchIntervalId); fetchIntervalId = null; }
             } else {
                 if (document.getElementById('start-screen').style.opacity === '0') {
                     if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
                     lastTimestamp = performance.now();
-                    if (!animationFrameId) animate();
+                    renderer.setAnimationLoop(animate);
                     if (!usingMockData && !fetchIntervalId) fetchIntervalId = setInterval(fetchFlights, 10000);
                 }
             }
@@ -529,11 +537,19 @@
         // --- Three.js Setup ---
         const container = document.getElementById('canvas-container');
         const scene = new THREE.Scene();
-        scene.fog = new THREE.FogExp2(0x87CEEB, 0.0006);
+        
+        // Corrected Fog density calculation to compensate for 0.05x camera rig scaling
+        scene.fog = new THREE.FogExp2(0x87CEEB, 0.0006 * SCALE);
 
-        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.005, 6000);
-        camera.position.set(0, targetCamY, 0); 
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 150000);
         camera.rotation.order = 'YXZ';
+
+        // --- WebXR Rig Setup ---
+        const cameraRig = new THREE.Group();
+        cameraRig.scale.setScalar(SCALE);
+        cameraRig.position.set(0, targetCamY, 0);
+        scene.add(cameraRig);
+        cameraRig.add(camera);
 
         const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
         renderer.setSize(window.innerWidth, window.innerHeight);
@@ -543,7 +559,36 @@
         
         renderer.shadowMap.enabled = true;
         renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        renderer.xr.enabled = true;
+        renderer.xr.setReferenceSpaceType('local-floor');
         container.appendChild(renderer.domElement);
+
+        // --- XR Device Check ---
+        if ('xr' in navigator) {
+            navigator.xr.isSessionSupported('immersive-vr').then((supported) => {
+                if (supported) {
+                    document.getElementById('stance-vr').style.display = 'flex';
+                }
+            });
+        }
+
+        let xrSession = null;
+        document.getElementById('stance-vr').addEventListener('click', async () => {
+            if (xrSession) {
+                xrSession.end();
+            } else {
+                try {
+                    const session = await navigator.xr.requestSession('immersive-vr', {
+                        optionalFeatures: ['local-floor', 'bounded-floor']
+                    });
+                    renderer.xr.setSession(session);
+                    xrSession = session;
+                    session.addEventListener('end', () => { xrSession = null; });
+                } catch (e) {
+                    console.warn("VR Init failed", e);
+                }
+            }
+        });
 
         const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 0.6);
         scene.add(hemiLight);
@@ -951,10 +996,11 @@
             skyContext.fillRect(0, 0, 2, 512);
             skyTexture.needsUpdate = true;
             
+            // Scaled fog density to correct for 0.05x camera rig shrinking
             scene.fog.color.setStyle(botColor);
-            scene.fog.density = isCloudy ? 0.0012 : 0.0006;
-            if (weatherCodeState >= 45 && weatherCodeState <= 48) scene.fog.density = 0.005; 
-            if (isStormActive) scene.fog.density = 0.002;
+            scene.fog.density = (isCloudy ? 0.0012 : 0.0006) * SCALE;
+            if (weatherCodeState >= 45 && weatherCodeState <= 48) scene.fog.density = 0.005 * SCALE; 
+            if (isStormActive) scene.fog.density = 0.002 * SCALE;
         }
 
         // --- Coarse / High-Contrast Ground Textures ---
@@ -1376,6 +1422,8 @@
         function updateParticles(dt, t) {
             if (!particleSystem) return;
             const positions = particleSystem.geometry.attributes.position.array;
+            const camWorldPos = new THREE.Vector3();
+            camera.getWorldPosition(camWorldPos);
             
             for(let i=0; i < particleVelocities.length; i++) {
                 let px = positions[i*3], py = positions[i*3+1], pz = positions[i*3+2];
@@ -1387,8 +1435,8 @@
                 } else { px += vel.x * dt; }
                 py += vel.y * dt;
 
-                if (py < 0 || Math.abs(px - camera.position.x) > 50 || Math.abs(pz - camera.position.z) > 50) {
-                    py = 50; px = camera.position.x + (Math.random() - 0.5) * 100; pz = camera.position.z + (Math.random() - 0.5) * 100;
+                if (py < 0 || Math.abs(px - camWorldPos.x) > 50 || Math.abs(pz - camWorldPos.z) > 50) {
+                    py = 50; px = camWorldPos.x + (Math.random() - 0.5) * 100; pz = camWorldPos.z + (Math.random() - 0.5) * 100;
                 }
                 positions[i*3] = px; positions[i*3+1] = py; positions[i*3+2] = pz;
             }
@@ -1598,9 +1646,6 @@
                 mesh.getObjectByName("contrailL").visible = isHighAlt;
                 mesh.getObjectByName("contrailR").visible = isHighAlt;
                 
-                mesh.castShadow = true;
-                mesh.receiveShadow = true;
-
                 scene.add(mesh);
 
                 const pathMat = PATH_MATERIALS[hash % PATH_MATERIALS.length];
@@ -1753,7 +1798,10 @@
         let camPitch = Math.PI / 6; 
 
         function updateCameraRotation() {
-            camera.rotation.y = camYaw; camera.rotation.x = camPitch;
+            if (!renderer.xr.isPresenting) {
+                camera.rotation.y = camYaw; 
+                camera.rotation.x = camPitch;
+            }
         }
         updateCameraRotation();
 
@@ -1765,7 +1813,7 @@
         }
         
         function handlePointerMove(e) {
-            if (!isDragging) return;
+            if (!isDragging || renderer.xr.isPresenting) return;
             const current = { x: e.touches ? e.touches[0].pageX : e.clientX, y: e.touches ? e.touches[0].pageY : e.clientY };
             camYaw += (current.x - prevMouse.x) * 0.003;
             camPitch += (current.y - prevMouse.y) * 0.003;
@@ -1820,13 +1868,12 @@
 
         // --- Main Loop ---
         function animate() {
-            animationFrameId = requestAnimationFrame(animate);
             const now = performance.now();
             const dt = (now - lastTimestamp) / 1000;
             const timeSeconds = now * 0.001;
             lastTimestamp = now;
 
-            camera.position.y += (targetCamY - camera.position.y) * 5 * dt;
+            cameraRig.position.y += (targetCamY - cameraRig.position.y) * 5 * dt;
 
             let localHour = 12; 
             if (currentAirport) {
@@ -1855,16 +1902,21 @@
                 } catch(e) {}
             }
             
+            const camWorldPos = new THREE.Vector3();
+            camera.getWorldPosition(camWorldPos);
+
             // Lightning Logic
             if (isStormActive && Math.random() < 0.005 && lightningFrames <= 0) {
-                const lx = camera.position.x + (Math.random() - 0.5) * 4000;
-                const lz = camera.position.z + (Math.random() - 0.5) * 4000;
+                const lx = camWorldPos.x + (Math.random() - 0.5) * 4000;
+                const lz = camWorldPos.z + (Math.random() - 0.5) * 4000;
                 createLightning(lx, lz);
                 lightningFrames = 4;
                 
                 const localPos = new THREE.Vector3(lx, 0, lz);
                 camera.worldToLocal(localPos);
-                const pan = Math.max(-1, Math.min(1, localPos.x / 2000));
+                
+                // Corrected audio panning with SCALE
+                const pan = Math.max(-1, Math.min(1, (localPos.x * SCALE) / 2000));
                 
                 setTimeout(() => { playThunder(pan); }, (0.5 + Math.random() * 1.5) * 1000);
             }
@@ -1960,7 +2012,7 @@
                         birdMesh.instanceMatrix.needsUpdate = true;
                         birdUniforms.uTime.value = timeSeconds;
 
-                        const distToCam = Math.sqrt(currentX*currentX + currentZ*currentZ);
+                        const distToCam = Math.sqrt(Math.pow(currentX - camWorldPos.x, 2) + Math.pow(currentZ - camWorldPos.z, 2));
                         const opacity = Math.max(0, Math.min(1, (250 - distToCam) / 50));
                         birdMesh.material.opacity = opacity;
 
@@ -1968,7 +2020,8 @@
                         if (distToCam < maxBirdAudioDist && Math.random() < 0.04) {
                             const localPos = new THREE.Vector3(currentX, currentY, currentZ);
                             camera.worldToLocal(localPos);
-                            const pan = Math.max(-1, Math.min(1, localPos.x / maxBirdAudioDist));
+                            // Corrected audio panning with SCALE
+                            const pan = Math.max(-1, Math.min(1, (localPos.x * SCALE) / maxBirdAudioDist));
                             const volScale = 1.0 - (distToCam / maxBirdAudioDist);
                             playBirdChirp(pan, volScale);
                         }
@@ -1979,25 +2032,7 @@
                 flockActive = false;
             }
 
-            if (particleSystem) {
-                const positions = particleSystem.geometry.attributes.position.array;
-                for(let i=0; i < particleVelocities.length; i++) {
-                    let px = positions[i*3], py = positions[i*3+1], pz = positions[i*3+2];
-                    const vel = particleVelocities[i];
-
-                    if (particleType === 'snow') {
-                        px += (vel.x + Math.sin(timeSeconds + py)) * 2 * dt;
-                        pz += (vel.z + Math.cos(timeSeconds + py)) * 2 * dt;
-                    } else { px += vel.x * dt; }
-                    py += vel.y * dt;
-
-                    if (py < 0 || Math.abs(px - camera.position.x) > 50 || Math.abs(pz - camera.position.z) > 50) {
-                        py = 50; px = camera.position.x + (Math.random() - 0.5) * 100; pz = camera.position.z + (Math.random() - 0.5) * 100;
-                    }
-                    positions[i*3] = px; positions[i*3+1] = py; positions[i*3+2] = pz;
-                }
-                particleSystem.geometry.attributes.position.needsUpdate = true;
-            }
+            updateParticles(dt, timeSeconds);
 
             cloudMeshes.forEach(c => {
                 c.mesh.position.x += c.speed * dt;
@@ -2019,50 +2054,56 @@
                     if (p.mesh.position.length() > 3000) p.mesh.position.copy(p.targetPos);
                 }
 
-                const distToCam = p.mesh.position.distanceTo(camera.position);
+                const distToCam = p.mesh.position.distanceTo(camWorldPos);
                 if (distToCam < closestDist) {
                     closestDist = distToCam;
                     const localPos = p.mesh.position.clone();
                     camera.worldToLocal(localPos);
-                    closestPan = Math.max(-1, Math.min(1, localPos.x / 100));
+                    // Corrected audio panning with SCALE
+                    closestPan = Math.max(-1, Math.min(1, (localPos.x * SCALE) / 100));
                 }
 
-                const proj = p.mesh.position.clone();
-                proj.project(camera);
+                if (!renderer.xr.isPresenting) {
+                    const proj = p.mesh.position.clone();
+                    proj.project(camera);
 
-                if (proj.z > 1) {
-                    p.el.classList.remove('visible');
+                    if (proj.z > 1) {
+                        p.el.classList.remove('visible');
+                    } else {
+                        p.el.classList.add('visible');
+                        
+                        const x = Math.round((proj.x * 0.5 + 0.5) * window.innerWidth);
+                        const y = Math.round((-(proj.y * 0.5) + 0.5) * window.innerHeight);
+
+                        if (p.lastScreenX !== x || p.lastScreenY !== y) {
+                            p.el.style.transform = `translate3d(${x}px, ${y}px, 0) translate(-50%, 45px)`;
+                            p.lastScreenX = x;
+                            p.lastScreenY = y;
+                        }
+                        
+                        let targetOpacity = '1';
+                        if (selectedIcao !== icao) {
+                            targetOpacity = distToCam > 1500 ? '0.2' : (distToCam > 800 ? '0.6' : '1');
+                        }
+                        if (p.lastOpacity !== targetOpacity) {
+                            p.el.style.opacity = targetOpacity;
+                            p.lastOpacity = targetOpacity;
+                        }
+                    }
                 } else {
-                    p.el.classList.add('visible');
-                    
-                    // Hardware accelerated caching to prevent DOM thrashing
-                    const x = Math.round((proj.x * 0.5 + 0.5) * window.innerWidth);
-                    const y = Math.round((-(proj.y * 0.5) + 0.5) * window.innerHeight);
-
-                    if (p.lastScreenX !== x || p.lastScreenY !== y) {
-                        p.el.style.transform = `translate3d(${x}px, ${y}px, 0) translate(-50%, 45px)`;
-                        p.lastScreenX = x;
-                        p.lastScreenY = y;
-                    }
-                    
-                    let targetOpacity = '1';
-                    if (selectedIcao !== icao) {
-                        targetOpacity = distToCam > 1500 ? '0.2' : (distToCam > 800 ? '0.6' : '1');
-                    }
-                    if (p.lastOpacity !== targetOpacity) {
-                        p.el.style.opacity = targetOpacity;
-                        p.lastOpacity = targetOpacity;
-                    }
+                    p.el.classList.remove('visible');
                 }
             });
 
             updateAudio(timeSeconds, closestDist, closestPan);
 
-            let degrees = (camYaw * 180 / Math.PI) % 360;
-            if (degrees < 0) degrees += 360;
-            document.getElementById('compass-dial').style.transform = `rotate(${degrees}deg)`;
-            const headingNum = Math.round(360 - degrees) % 360;
-            document.getElementById('heading-display').textContent = `${headingNum === 0 ? 360 : headingNum}°`;
+            if (!renderer.xr.isPresenting) {
+                let degrees = (camYaw * 180 / Math.PI) % 360;
+                if (degrees < 0) degrees += 360;
+                document.getElementById('compass-dial').style.transform = `rotate(${degrees}deg)`;
+                const headingNum = Math.round(360 - degrees) % 360;
+                document.getElementById('heading-display').textContent = `${headingNum === 0 ? 360 : headingNum}°`;
+            }
 
             renderer.render(scene, camera);
         }
@@ -2112,13 +2153,13 @@
                 document.getElementById('ui-layer').style.opacity = '1';
                 
                 lastTimestamp = performance.now();
-                if (!animationFrameId) animate();
+                renderer.setAnimationLoop(animate);
                 if (!usingMockData && !fetchIntervalId) fetchIntervalId = setInterval(fetchFlights, 10000); 
             }, 800);
         });
 
         document.getElementById('back-btn').addEventListener('click', () => {
-            if (animationFrameId) { cancelAnimationFrame(animationFrameId); animationFrameId = null; }
+            renderer.setAnimationLoop(null);
             if (fetchIntervalId) { clearInterval(fetchIntervalId); fetchIntervalId = null; }
             suspendAudio();
             clearAirspace();
