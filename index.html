@@ -82,8 +82,8 @@
         .status-badge.empty .status-dot { opacity: 0.2; }
         @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
 
-        #path-toggle { background: rgba(80, 80, 80, 0.85); border: 1px solid rgba(150, 150, 150, 0.4); color: #ccc; }
-        #path-toggle.active { background: rgba(79, 172, 254, 0.85); border: 1px solid rgba(135, 206, 235, 0.4); color: #fff; }
+        #path-toggle, #tags-toggle { background: rgba(80, 80, 80, 0.85); border: 1px solid rgba(150, 150, 150, 0.4); color: #ccc; }
+        #path-toggle.active, #tags-toggle.active { background: rgba(79, 172, 254, 0.85); border: 1px solid rgba(135, 206, 235, 0.4); color: #fff; }
 
         #back-btn { background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); color: white; padding: 4px 10px; border-radius: 6px; font-size: 11px; cursor: pointer; margin-left: 12px; transition: background 0.2s; backdrop-filter: var(--ui-backdrop); }
         #back-btn:hover { background: rgba(255,255,255,0.2); }
@@ -141,7 +141,7 @@
             <select class="airport-selector-start" id="setup-airport">
                 <option value="SIN" data-name="SIN - Changi Beach" data-lat="1.3918" data-lon="104.0003" data-env="sandgrass" data-tz="Asia/Singapore">Singapore (SIN) - Changi Beach</option>
                 <option value="JFK" data-name="JFK - Charles Park" data-lat="40.6508" data-lon="-73.8397" data-env="grassbrown" data-tz="America/New_York">New York (JFK) - Charles Park</option>
-                <option value="LHR" data-name="LHR - Myrtle Ave" data-lat="51.4646" data-lon="-0.4280" data-env="lush" data-tz="Europe/London">London (LHR) - Myrtle Ave</option>
+                <option value="LHR" data-name="LHR - Myrtle Ave" data-lat="51.4635" data-lon="-0.4205" data-env="lush" data-tz="Europe/London">London (LHR) - Myrtle Ave</option>
                 <option value="HND" data-name="HND - Jonanjima" data-lat="35.5802" data-lon="139.7832" data-env="asphalt" data-tz="Asia/Tokyo">Tokyo (HND) - Jonanjima Park</option>
                 <option value="DXB" data-name="DXB - Al Garhoud" data-lat="25.2445" data-lon="55.3400" data-env="sand" data-tz="Asia/Dubai">Dubai (DXB) - Al Garhoud Park</option>
             </select>
@@ -170,6 +170,9 @@
                 </div>
                 <div class="status-badge" id="path-toggle">
                     PATHS: OFF
+                </div>
+                <div class="status-badge active" id="tags-toggle">
+                    TAGS: ON
                 </div>
             </div>
         </div>
@@ -215,6 +218,7 @@
         let usingMockData = false;
         let selectedIcao = null;
         let showPaths = false;
+        let showTags = true;
         
         let currentEnvType = 'grass';
         let isWinter = false;
@@ -453,8 +457,8 @@
         function cleanEnvironment() {
             envGroup.children.forEach(obj => {
                 obj.traverse(child => {
-                    if (child.userData && child.userData.disposeGeometry && child.geometry) {
-                        child.geometry.dispose();
+                    if (child.userData && child.userData.disposeGeometry) {
+                        if (child.geometry) child.geometry.dispose();
                     }
                 });
             });
@@ -499,6 +503,7 @@
             }
         });
 
+        // --- Three.js Setup ---
         const container = document.getElementById('canvas-container');
         const scene = new THREE.Scene();
         scene.fog = new THREE.FogExp2(0x87CEEB, 0.0006);
@@ -920,7 +925,6 @@
             if (isStormActive) scene.fog.density = 0.002;
         }
 
-        // --- Coarse / High-Contrast Ground Textures ---
         function generateGroundTexture(envType, winter) {
             const size = 1024;
             const canvas = document.createElement('canvas');
@@ -968,7 +972,6 @@
         ground.receiveShadow = true;
         scene.add(ground);
 
-        // --- Cross-Quad Clump Grass Generation ---
         const GRASS_COUNT = 6000;
         let grassMesh;
         const grassUniforms = { uTime: { value: 0 } };
@@ -1080,7 +1083,6 @@
             grassMesh.visible = (showGrass && !isWinter);
         }
 
-        // Procedural Scenery Generators
         const rwTexCanvas = document.createElement('canvas');
         rwTexCanvas.width = 128; rwTexCanvas.height = 512;
         const rwCtx = rwTexCanvas.getContext('2d');
@@ -1091,7 +1093,6 @@
         for(let i=10; i<118; i+=10) { rwCtx.fillRect(i, 20, 5, 80); rwCtx.fillRect(i, 412, 5, 80); }
         const rwTex = new THREE.CanvasTexture(rwTexCanvas);
         rwTex.wrapS = rwTex.wrapT = THREE.RepeatWrapping;
-        rwTex.repeat.set(1, 30); 
         rwTex.anisotropy = maxAnisotropy;
         const runwayMat = new THREE.MeshLambertMaterial({ map: rwTex });
 
@@ -1109,26 +1110,43 @@
         const leafPalm = new THREE.SphereGeometry(0.15, 5, 5);
         const leafMat = new THREE.MeshLambertMaterial({ color: 0x2d5a27, flatShading: true });
 
-        function addRunway(x, z, length, width, heading) {
+        function addDynamicRunway(lat1, lon1, lat2, lon2, width = 3) {
+            const x1 = (lon1 - currentAirport.lon) * 111320 * SCALE;
+            const z1 = -(lat1 - currentAirport.lat) * 111320 * SCALE;
+            const x2 = (lon2 - currentAirport.lon) * 111320 * SCALE;
+            const z2 = -(lat2 - currentAirport.lat) * 111320 * SCALE;
+            
+            const cx = (x1 + x2) / 2;
+            const cz = (z1 + z2) / 2;
+            const dx = x2 - x1;
+            const dz = z2 - z1;
+            
+            const length = Math.sqrt(dx*dx + dz*dz);
+            const heading = Math.atan2(dx, dz);
+            
             const rwGroup = new THREE.Group();
-            rwGroup.position.set(x, 0.01, z);
-            rwGroup.rotation.y = -heading * (Math.PI/180);
+            rwGroup.position.set(cx, 0.01, cz);
+            rwGroup.rotation.y = heading;
 
             const pGeo = new THREE.PlaneGeometry(width, length);
-            const rwMesh = new THREE.Mesh(pGeo, runwayMat);
+            
+            const mat = runwayMat.clone();
+            mat.map = mat.map.clone();
+            mat.map.needsUpdate = true;
+            mat.map.repeat.set(1, Math.max(10, Math.floor(length / 5)));
+            
+            const rwMesh = new THREE.Mesh(pGeo, mat);
             rwMesh.rotation.x = -Math.PI/2;
             rwMesh.receiveShadow = true;
             rwMesh.userData.disposeGeometry = true; 
             rwGroup.add(rwMesh);
 
-            // Exclusion Zone for procedural clutter
             const dummyBox = new THREE.Object3D();
-            dummyBox.position.set(x, 0, z);
-            dummyBox.rotation.y = -heading * (Math.PI/180);
+            dummyBox.position.set(cx, 0, cz);
+            dummyBox.rotation.y = heading;
             dummyBox.updateMatrixWorld();
             exclusionZones.push({ inverseMat: dummyBox.matrixWorld.clone().invert(), width: width + 30, length: length + 30 });
 
-            // Runway Edge Lights
             const numLights = Math.floor(length / 8);
             const sGeo = new THREE.SphereGeometry(0.2, 4, 4);
             const lightInst = new THREE.InstancedMesh(sGeo, runwayLightMat, numLights * 2);
@@ -1147,13 +1165,12 @@
             }
             rwGroup.add(lightInst);
 
-            // Overhead Surface SpotLight
             const sLight = new THREE.SpotLight(0xfff5e6, 0); 
-            sLight.position.set(0, 50, 0);
+            sLight.position.set(0, Math.max(50, length / 4), 0);
             sLight.target.position.set(0, 0, 0);
             sLight.angle = Math.PI / 2.5;
             sLight.penumbra = 0.5;
-            sLight.distance = 200;
+            sLight.distance = length * 1.5;
             rwGroup.add(sLight);
             rwGroup.add(sLight.target);
             envSpotlights.push(sLight);
@@ -1257,33 +1274,41 @@
 
             switch(id) {
                 case 'SIN':
-                    addRunway(10, 80, 150, 3, 20); 
-                    addTerminal(20, 150, 20, 30, 20);
-                    addTrees('palm', 0, 0, 60, 30);
+                    addDynamicRunway(1.3440, 103.9825, 1.3795, 103.9922); 
+                    addDynamicRunway(1.3394, 103.9880, 1.3750, 103.9976); 
+                    addDynamicRunway(1.3283, 104.0084, 1.3644, 104.0182); 
+                    addTerminal(-62, 177, 30, 20, 20);
+                    addTrees('palm', 0, 0, 60, 50);
                     break;
                 case 'LHR':
-                    addRunway(-80, 0, 150, 3, 270); 
-                    addTerminal(-180, 20, 30, 40, 270);
-                    addBuildings('house', 30, 0, 150, 40);
-                    addTrees('deciduous', 20, 0, 50, 30);
+                    addDynamicRunway(51.4775, -0.4880, 51.4771, -0.4316); 
+                    addDynamicRunway(51.4649, -0.4798, 51.4646, -0.4265); 
+                    addTerminal(-150, -35, 40, 30, 0);
+                    addBuildings('house', 0, 0, 150, 60);
+                    addTrees('deciduous', 0, 0, 50, 40);
                     break;
                 case 'JFK':
-                    addRunway(60, 60, 150, 3, 130); 
-                    addRunway(50, 90, 150, 3, 220); 
-                    addTerminal(120, 120, 40, 20, 130);
-                    addTrees('bare', 0, 0, 40, 25);
+                    addDynamicRunway(40.6247, -73.7844, 40.6475, -73.7663); 
+                    addDynamicRunway(40.6234, -73.7698, 40.6461, -73.7548); 
+                    addDynamicRunway(40.6552, -73.7915, 40.6358, -73.7610); 
+                    addDynamicRunway(40.6547, -73.8055, 40.6219, -73.7644); 
+                    addTerminal(321, 43, 40, 20, 45);
+                    addTrees('bare', 0, 0, 80, 50); 
                     break;
                 case 'HND':
-                    addRunway(-40, 80, 150, 3, 220); 
-                    addTerminal(20, 140, 50, 20, 220);
-                    addBuildings('warehouse', 40, -20, 40, 40);
+                    addDynamicRunway(35.5683, 139.7946, 35.5415, 139.8033); 
+                    addDynamicRunway(35.5614, 139.7820, 35.5342, 139.7909); 
+                    addDynamicRunway(35.5402, 139.7712, 35.5583, 139.7925); 
+                    addDynamicRunway(35.5291, 139.8130, 35.5480, 139.8333); 
+                    addTerminal(4, 179, 50, 20, 0);
+                    addBuildings('warehouse', 0, 0, 60, 50); 
                     break;
                 case 'DXB':
-                    addRunway(60, 50, 150, 3, 120); 
-                    addRunway(70, 60, 150, 3, 120); 
-                    addTerminal(130, 110, 50, 15, 120);
-                    addBuildings('villa', -10, -10, 80, 40);
-                    addTrees('palm', 0, 0, 30, 20);
+                    addDynamicRunway(25.2673, 55.3375, 25.2412, 55.3695); 
+                    addDynamicRunway(25.2584, 55.3331, 25.2289, 55.3694); 
+                    addTerminal(83, -30, 50, 15, 120);
+                    addBuildings('villa', 0, 0, 100, 60); 
+                    addTrees('palm', 0, 0, 40, 30);
                     break;
             }
         }
@@ -1339,8 +1364,6 @@
         function updateParticles(dt, t) {
             if (!particleSystem) return;
             const positions = particleSystem.geometry.attributes.position.array;
-            const camWorldPos = new THREE.Vector3();
-            camera.getWorldPosition(camWorldPos);
             
             for(let i=0; i < particleVelocities.length; i++) {
                 let px = positions[i*3], py = positions[i*3+1], pz = positions[i*3+2];
@@ -1352,8 +1375,8 @@
                 } else { px += vel.x * dt; }
                 py += vel.y * dt;
 
-                if (py < 0 || Math.abs(px - camWorldPos.x) > 50 || Math.abs(pz - camWorldPos.z) > 50) {
-                    py = 50; px = camWorldPos.x + (Math.random() - 0.5) * 100; pz = camWorldPos.z + (Math.random() - 0.5) * 100;
+                if (py < 0 || Math.abs(px - camera.position.x) > 50 || Math.abs(pz - camera.position.z) > 50) {
+                    py = 50; px = camera.position.x + (Math.random() - 0.5) * 100; pz = camera.position.z + (Math.random() - 0.5) * 100;
                 }
                 positions[i*3] = px; positions[i*3+1] = py; positions[i*3+2] = pz;
             }
@@ -1538,7 +1561,7 @@
         function createOrUpdatePlane(icao, callsign, lat2, lng, alt, velocity, heading) {
             const x = (lng - currentAirport.lon) * 111320 * SCALE;
             const z = -(lat2 - currentAirport.lat) * 111320 * SCALE; 
-            const y = Math.max(alt * SCALE, 10);
+            const y = Math.max(alt * SCALE, 0.4);
             
             const dispCallsign = callsign && callsign !== 'N/A' && callsign.trim() !== '' ? callsign.trim() : 'UNKNOWN';
             const hexStr = icao.toUpperCase();
@@ -1565,7 +1588,7 @@
                 mesh.userData = { icao: icao }; 
 
                 const hash = icao.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-                const scaleMod = 0.6 + ((hash % 100) / 100) * 0.7;
+                const scaleMod = 0.25 + ((hash % 100) / 100) * 0.15;
                 mesh.scale.setScalar(scaleMod);
                 
                 mesh.getObjectByName("contrailL").visible = isHighAlt;
@@ -1576,7 +1599,7 @@
                 const pathMat = PATH_MATERIALS[hash % PATH_MATERIALS.length];
                 const pathLine = new THREE.Mesh(pathPlaneGeo, pathMat);
                 pathLine.rotation.x = -Math.PI / 2; 
-                pathLine.position.y = -1.5; 
+                pathLine.position.y = -1.0; 
                 pathLine.visible = showPaths;
                 mesh.add(pathLine);
 
@@ -1608,7 +1631,6 @@
 
                 document.getElementById('labels-container').appendChild(el);
                 
-                // Track state for DOM optimizations
                 activePlanes.set(icao, { 
                     mesh, el, pathLine, 
                     targetPos: new THREE.Vector3(x, y, z), 
@@ -1710,6 +1732,14 @@
             activePlanes.forEach(p => { if (p.pathLine) p.pathLine.visible = showPaths; });
         }
 
+        function toggleTags() {
+            showTags = !showTags;
+            const btn = document.getElementById('tags-toggle');
+            btn.textContent = showTags ? 'TAGS: ON' : 'TAGS: OFF';
+            btn.classList.toggle('active', showTags);
+            document.getElementById('labels-container').style.display = showTags ? 'block' : 'none';
+        }
+
         function setStance(heightUnits, btnId) {
             targetCamY = heightUnits;
             document.querySelectorAll('.stance-btn').forEach(b => b.classList.remove('active'));
@@ -1754,6 +1784,7 @@
         window.addEventListener('pointerup', handlePointerUp);
         document.getElementById('data-status-badge').addEventListener('click', toggleDataMode);
         document.getElementById('path-toggle').addEventListener('click', togglePaths);
+        document.getElementById('tags-toggle').addEventListener('click', toggleTags);
 
         document.getElementById('stance-float').addEventListener('click', () => setStance(5.0, 'stance-float'));
         document.getElementById('stance-sit').addEventListener('click', () => setStance(0.05, 'stance-sit'));
@@ -1857,7 +1888,6 @@
             updateSkyAndLighting(localHour);
 
             if (starLayer1 && starLayer2) {
-                // Fixed orbital rotation without X/Z tilt that causes bleeding
                 starLayer1.rotation.y += 0.0035 * dt;
                 starLayer2.rotation.y += 0.007 * dt;
             }
