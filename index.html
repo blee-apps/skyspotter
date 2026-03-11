@@ -1671,7 +1671,7 @@
             return AIRLINE_MAP[code] || "Private / Unknown Carrier";
         }
 
-        function createOrUpdatePlane(icao, callsign, lat2, lng, alt, velocity, heading) {
+        function createOrUpdatePlane(icao, callsign, lat2, lng, alt, velocity, heading, vRate) {
             const x = (lng - currentAirport.lon) * 111320 * SCALE;
             const z = -(lat2 - currentAirport.lat) * 111320 * SCALE; 
             const y = Math.max(alt * SCALE, 0.4);
@@ -1684,8 +1684,12 @@
             if (activePlanes.has(icao)) {
                 const p = activePlanes.get(icao);
                 p.targetPos.set(x, y, z);
+                
+                p.worldPos.set(x, p.worldPos.y, z);
                 p.velocity = velocity;
+                p.vRate = vRate;
                 p.heading = heading;
+                p.alt = alt; 
                 p.lastUpdate = performance.now();
                 
                 p.mesh.getObjectByName("contrailL").visible = isHighAlt;
@@ -1749,7 +1753,7 @@
                     targetPos: new THREE.Vector3(x, y, z), 
                     worldPos: new THREE.Vector3(x, y, z),
                     baseScale: scaleMod,
-                    velocity, heading, alt,
+                    velocity, heading, alt, vRate,
                     lastScreenX: null, lastScreenY: null, lastOpacity: null
                 });
             }
@@ -1768,8 +1772,9 @@
                 const alt = i % 3 === 0 ? 8500 + Math.random() * 2000 : 200 + Math.random() * 800;
                 const vel = 80 + Math.random() * 100;
                 const hdg = Math.random() * 360;
+                const vRate = (Math.random() - 0.5) * 10;
                 
-                createOrUpdatePlane(icao, callsign, currentAirport.lat + latOff, currentAirport.lon + lngOff, alt, vel, hdg);
+                createOrUpdatePlane(icao, callsign, currentAirport.lat + latOff, currentAirport.lon + lngOff, alt, vel, hdg, vRate);
             }
         }
 
@@ -1788,11 +1793,11 @@
                 
                 if (data.states) {
                     data.states.forEach(state => {
-                        const [icao, callsign, , , , lng, lat2, baro_alt, on_ground, velocity, heading, , , geo_alt] = state;
-                        const alt = baro_alt || geo_alt || 0;
+                        const [icao, callsign, , , , lng, lat2, baro_alt, on_ground, velocity, heading, v_rate, , geo_alt] = state;
+                        const alt = geo_alt !== null ? geo_alt : (baro_alt !== null ? baro_alt : 0);
                         if (lng === null || lat2 === null || on_ground) return;
                         receivedIcaos.add(icao);
-                        createOrUpdatePlane(icao, callsign, lat2, lng, alt, velocity || 0, heading || 0);
+                        createOrUpdatePlane(icao, callsign, lat2, lng, alt, velocity || 0, heading || 0, v_rate || 0);
                         count++;
                     });
                 }
@@ -2112,10 +2117,17 @@
 
             activePlanes.forEach((p, icao) => {
                 const speedScale = p.velocity * SCALE;
+                const vSpeedScale = p.vRate * SCALE;
                 const rad = p.heading * (Math.PI / 180);
                 
+                // Dead reckoning, now including live vertical rates
                 p.worldPos.x += Math.sin(rad) * speedScale * dt;
                 p.worldPos.z += -Math.cos(rad) * speedScale * dt;
+                p.worldPos.y += vSpeedScale * dt;
+                
+                // Floor clamp
+                if (p.worldPos.y < 0.4) p.worldPos.y = 0.4;
+                
                 p.mesh.rotation.y = -rad;
 
                 if (usingMockData) { 
