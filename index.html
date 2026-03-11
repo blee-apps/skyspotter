@@ -6,8 +6,8 @@
     <title>SkySpotter</title>
     
     <!-- App Icons & PWA Meta -->
-    <link rel="icon" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMDAgMTAwIj48Y2lyY2xlIGN4PSI1MCIgY3k9IjUwIiByPSI1MCIgZmlsbD0iIzAwMCIvPjxwYXRoIGQ9Ik01MCAxNUw4NSA4NUw1MCA3MEwxNSA4NVoiIGZpbGw9IiM0ZmFjZmUiLz48L3N2Zz4=">
-    <link rel="apple-touch-icon" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMDAgMTAwIj48Y2lyY2xlIGN4PSI1MCIgY3k9IjUwIiByPSI1MCIgZmlsbD0iIzAwMCIvPjxwYXRoIGQ9Ik01MCAxNUw4NSA4NUw1MCA3MEwxNSA4NVoiIGZpbGw9IiM0ZmFjZmUiLz48L3N2Zz4=">
+    <link rel="icon" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMDAgMTAwIj48cmVjdCB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgcng9IjIyIiBmaWxsPSIjMTExMTExIi8+PGcgdHJhbnNmb3JtPSJyb3RhdGUoNDUgNTAgNTApIiBmaWxsPSIjNGZhY2ZlIj48cGF0aCBkPSJNNTAgMTIgQyA1MyAxMiA1NSAxNSA1NSAyMCBMIDU1IDQ1IEwgOTAgNjUgTCA5MCA3MiBMIDU1IDYyIEwgNTUgODIgTCA2NSA5MCBMIDY1IDk0IEwgNTAgOTAgTCAzNSA5NCBMIDM1IDkwIEwgNDUgODIgTCA0NSA2MiBMIDEwIDcyIEwgMTAgNjUgTCA0NSA0NSBMIDQ1IDIwIEMgNDUgMTUgNDcgMTIgNTAgMTIgWiIvPjwvZz48L3N2Zz4=">
+    <link rel="apple-touch-icon" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMDAgMTAwIj48cmVjdCB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgcng9IjIyIiBmaWxsPSIjMTExMTExIi8+PGcgdHJhbnNmb3JtPSJyb3RhdGUoNDUgNTAgNTApIiBmaWxsPSIjNGZhY2ZlIj48cGF0aCBkPSJNNTAgMTIgQyA1MyAxMiA1NSAxNSA1NSAyMCBMIDU1IDQ1IEwgOTAgNjUgTCA5MCA3MiBMIDU1IDYyIEwgNTUgODIgTCA2NSA5MCBMIDY1IDk0IEwgNTAgOTAgTCAzNSA5NCBMIDM1IDkwIEwgNDUgODIgTCA0NSA2MiBMIDEwIDcyIEwgMTAgNjUgTCA0NSA0NSBMIDQ1IDIwIEMgNDUgMTUgNDcgMTIgNTAgMTIgWiIvPjwvZz48L3N2Zz4=">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="SkySpotter">
@@ -622,6 +622,7 @@
                         
                         float n = fbm(st);
                         
+                        // Strict termination exactly at the horizon (Y = 0)
                         float verticalMask = smoothstep(0.4, 0.05, height) * step(0.0, height);
                         float cloudAlpha = smoothstep(0.3, 0.7, n) * verticalMask;
                         
