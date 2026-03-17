@@ -6,8 +6,10 @@
     <title>SkySpotter</title>
     
     <!-- App Icons & PWA Meta -->
-    <link rel="icon" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMDAgMTAwIj48cmVjdCB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgcng9IjIyIiBmaWxsPSIjMTExMTExIi8+PGcgdHJhbnNmb3JtPSJyb3RhdGUoNDUgNTAgNTApIiBmaWxsPSIjNGZhY2ZlIj48cGF0aCBkPSJNNTAgMTIgQyA1MyAxMiA1NSAxNSA1NSAyMCBMIDU1IDQ1IEwgOTAgNjUgTCA5MCA3MiBMIDU1IDYyIEwgNTUgODIgTCA2NSA5MCBMIDY1IDk0IEwgNTAgOTAgTCAzNSA5NCBMIDM1IDkwIEwgNDUgODIgTCA0NSA2MiBMIDEwIDcyIEwgMTAgNjUgTCA0NSA0NSBMIDQ1IDIwIEMgNDUgMTUgNDcgMTIgNTAgMTIgWiIvPjwvZz48L3N2Zz4=">
-    <link rel="apple-touch-icon" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMDAgMTAwIj48cmVjdCB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgcng9IjIyIiBmaWxsPSIjMTExMTExIi8+PGcgdHJhbnNmb3JtPSJyb3RhdGUoNDUgNTAgNTApIiBmaWxsPSIjNGZhY2ZlIj48cGF0aCBkPSJNNTAgMTIgQyA1MyAxMiA1NSAxNSA1NSAyMCBMIDU1IDQ1IEwgOTAgNjUgTCA5MCA3MiBMIDU1IDYyIEwgNTUgODIgTCA2NSA5MCBMIDY1IDk0IEwgNTAgOTAgTCAzNSA5NCBMIDM1IDkwIEwgNDUgODIgTCA0NSA2MiBMIDEwIDcyIEwgMTAgNjUgTCA0NSA0NSBMIDQ1IDIwIEMgNDUgMTUgNDcgMTIgNTAgMTIgWiIvPjwvZz48L3N2Zz4=">
+    <link rel="icon" type="image/png" sizes="512x512" href="/icon-512.png">
+    <link rel="apple-touch-icon" href="/icon-512.png">
+    <link rel="manifest" href='data:application/manifest+json;charset=utf-8,{"name":"SkySpotter","short_name":"SkySpotter","start_url":".","display":"standalone","background_color":"#050505","theme_color":"#050505","icons":[{"src":"/icon-512.png","sizes":"512x512","type":"image/png"}]}'>
+    <meta name="theme-color" content="#050505">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="SkySpotter">
@@ -37,6 +39,7 @@
             color: #111;
         }
 
+        .hero-logo { width: 96px; height: 96px; border-radius: 22px; margin-bottom: 20px; box-shadow: 0 8px 24px rgba(0,0,0,0.15); object-fit: cover; background: #111; }
         .hero-title { font-size: 48px; font-weight: 700; letter-spacing: -1.5px; margin-bottom: 8px; color: #000; }
         .hero-subtitle { font-size: 16px; color: #444; margin-bottom: 40px; font-weight: 500; text-align: center; }
 
@@ -142,6 +145,7 @@
 <body>
 
     <div id="start-screen">
+        <img src="/icon-512.png" alt="SkySpotter Logo" class="hero-logo" onerror="this.style.display='none'">
         <h1 class="hero-title">SkySpotter</h1>
         <p class="hero-subtitle">Immersive 3D plane-spotting with live data</p>
         
